@@ -1,0 +1,6 @@
+[submodule "transformers"]
+	path = transformers
+	url = https://github.com/MKDehdashti/transformers.git
+[submodule "qwen-vl-utils"]
+	path = qwen-vl-utils
+	url = https://github.com/MKDehdashti/qwen-vl-utils.git

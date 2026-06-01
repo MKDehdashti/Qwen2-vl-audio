@@ -1,0 +1,42 @@
+# ---- PyTorch (CUDA 12.4) ----
+# Provided by RunPod template — do not pip-install these
+#torch==2.6.0+cu124
+#torchvision==0.21.0+cu124
+#torchaudio==2.6.0+cu124
+
+# ---- Hugging Face / LLM stack ----
+# transformers: install from submodule, NOT from PyPI
+#   pip install -e ./transformers
+# (submodule is MKDehdashti/transformers, version 5.0.0.dev0 with Qwen2VL audio extension)
+trl==0.14.0
+datasets
+accelerate
+peft
+
+# ---- Qwen VL utils (install from submodule) ----
+# pip install -e ./qwen-vl-utils
+# (listed here for reference only — do not pip install the PyPI package)
+#qwen-vl-utils
+
+# ---- Experiment tracking ----
+wandb
+
+# ---- Visualization & notebooks ----
+matplotlib
+IPython
+
+# ---- Flash Attention 2 (A100 / Ampere+) ----
+# IMPORTANT: 2.8.x wheels have wrong ABI for torch 2.6.0+cu124 — must use 2.7.4.post1
+flash-attn==2.7.4.post1
+
+# ---- Audio / TTS ----
+librosa
+soundfile
+jiwer
+edge-tts
+
+# ---- Vision ----
+Pillow
+
+# ---- bitsandbytes (QLoRA) — not needed, A100 80GB fits 7B bfloat16 ----
+#bitsandbytes==0.47.0
