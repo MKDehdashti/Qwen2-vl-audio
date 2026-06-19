@@ -1,25 +1,94 @@
+# -----------------------
+# Python
+# -----------------------
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
 *.so
+*.egg
 *.egg-info/
+*.log
+
+# -----------------------
+# Virtual environment
+# -----------------------
 .venv/
 venv/
-.env
-*.env
-.secrets
-wandb/
-.cache/
+env/
+
+# -----------------------
+# Model weights & checkpoints
+# These are large and live on HuggingFace instead
+# -----------------------
+model_checkpoint/
+stage1_checkpoint_*/
+stage2_checkpoint_*/
+stage3_checkpoint_*/
 *.safetensors
 *.pt
 *.bin
 *.ckpt
-.DS_Store
+*.h5
+*.onnx
+
+# -----------------------
+# HuggingFace / dataset cache
+# -----------------------
+.cache/
+hf_cache/
+hf_home/
+tmp/
+
+# -----------------------
+# W&B
+# -----------------------
+wandb/
+
+# -----------------------
+# Jupyter
+# -----------------------
+.ipynb_checkpoints/
+*.ipynb_save
+
+# -----------------------
+# Secrets
+# -----------------------
+.env
+*.env
+.secrets
+secrets/
+
+# -----------------------
+# Claude Code
+# -----------------------
+.claude/settings.local.json
+
+# -----------------------
+# Reference / design files (large, not source code)
+# -----------------------
+# fine_tuning_vlm_for_speech_understanding_trl.ipynb
+VLA pipeline.drawio
+avqa_pipeline.drawio
+
+# -----------------------
+# Personal / interview prep (not for public repo)
+# -----------------------
+# interview_roadmap.md
+# interview_prep.md
+# avqa_roadmap.tex
+# avqa_tikz.tex
+Notes
+# scratch.ipynb
+# scratch_2.ipynb
+
+# -----------------------
+# Editor / OS
+# -----------------------
 .vscode/
 .idea/
-.ipynb_checkpoints/
-music_avqa_dataset/data/video/
-music_avqa_dataset/data/panns_features/
-music_avqa_dataset/data/whisper_features*/
-music_avqa_dataset/data/clap_features/
-music_avqa_dataset/data/tts_questions/
-music_avqa_dataset/data/video_frames/
+.DS_Store
+music_avqa_dataset/data/*/
+
+# Local video data (37GB) — features live on HF, not git
+/data/

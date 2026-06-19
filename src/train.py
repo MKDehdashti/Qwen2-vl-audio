@@ -789,7 +789,8 @@ WHISPER_MUSIC_DIR = '/workspace/projects/speech/music_avqa_dataset/data/whisper_
 
 
 def init_avqa_whisper_model(base_repo=HF_REPO,
-                            processor_path='/workspace/projects/speech/processor'):
+                            processor_path='/workspace/projects/speech/processor',
+                            seed=42):
     """Load model for Whisper-as-music-encoder ablation.
 
     Sets music_seq_input=True, music_embed_dim=1280, n_music_tokens=32 in config
@@ -819,8 +820,9 @@ def init_avqa_whisper_model(base_repo=HF_REPO,
     model.config.n_music_tokens   = 32
 
     # Re-initialise music_projector with the correct shape: Linear(1280, H)
+    # seed controls the projector init → vary it for multi-seed error-bar runs.
     import torch.nn as nn
-    torch.manual_seed(42)
+    torch.manual_seed(seed)
     llm_hidden = model.config.text_config.hidden_size
     model.music_projector = nn.Linear(1280, llm_hidden, bias=True).to(
         device=next(model.parameters()).device,
@@ -1355,20 +1357,27 @@ WHISPER_FULLRES_MUSIC_DIR       = '/workspace/projects/speech/music_avqa_dataset
 def run_avqa_whisper_full_stage1(model=None, processor=None,
                                   train_dataset=None, val_dataset=None,
                                   output_dir=None, resume_from_checkpoint=None,
-                                  music_dir=None, experiment_tag='whisper32_full'):
+                                  music_dir=None, experiment_tag='whisper32_full',
+                                  seed=42, push=True):
     """Train Whisper-full Stage 1: music_projector only.
 
     Pass music_dir=WHISPER_FULLRES_MUSIC_DIR and experiment_tag='whisper_fullres'
     to run the per-chunk-pooling variant without duplicating this function.
+
+    seed: controls projector init + data-shuffle order (multi-seed error-bar runs).
+    push: False → save Stage 1 locally only, skip HF upload (so seed runs don't
+          clobber the canonical avqa_stage1_{tag}/ subfolder on HF).
     """
+    from transformers import set_seed
     from avqa.dataset import AVQADataset
     from avqa.eval_utils import evaluate_avqa, AVQAEvalCallback
 
+    set_seed(seed)
     if music_dir is None:
         music_dir = WHISPER_FULL_MUSIC_DIR
 
     if model is None or processor is None:
-        model, processor = init_avqa_whisper_model()
+        model, processor = init_avqa_whisper_model(seed=seed)
         freeze_for_avqa_whisper_stage1(model)
 
     if train_dataset is None:
@@ -1389,6 +1398,8 @@ def run_avqa_whisper_full_stage1(model=None, processor=None,
 
     sft_config = SFTConfig(**{
         'output_dir':                      output_dir,
+        'seed':                            seed,
+        'data_seed':                       seed,
         'num_train_epochs':                1,
         'per_device_train_batch_size':     4,
         'per_device_eval_batch_size':      4,
@@ -1405,7 +1416,7 @@ def run_avqa_whisper_full_stage1(model=None, processor=None,
         'dataloader_pin_memory':           True,
         'logging_steps':                   10,
         'eval_strategy':                   'steps',
-        'eval_steps':                      100,
+        'eval_steps':                      250,
         'save_strategy':                   'steps',
         'save_steps':                      100,
         'save_total_limit':                1,
@@ -1447,7 +1458,11 @@ def run_avqa_whisper_full_stage1(model=None, processor=None,
     if wandb.run is not None:
         wandb.finish()
 
-    push_avqa_whisper_full_stage1(trainer, experiment_tag=experiment_tag)
+    if push:
+        push_avqa_whisper_full_stage1(trainer, experiment_tag=experiment_tag)
+    else:
+        trainer.save_model(trainer.args.output_dir)
+        print(f"[seed={seed}] Stage 1 saved locally (no HF push): {trainer.args.output_dir}")
     return trainer
 
 
@@ -1506,16 +1521,23 @@ def setup_avqa_whisper_full_stage2(checkpoint_path=HF_REPO, subfolder='avqa_stag
 def run_avqa_whisper_full_stage2(model, processor, lora_config,
                                   train_dataset=None, val_dataset=None,
                                   output_dir=None, resume_from_checkpoint=None,
-                                  music_dir=None, experiment_tag='whisper32_full'):
+                                  music_dir=None, experiment_tag='whisper32_full',
+                                  num_train_epochs=1, seed=42, push=True):
     """Train Whisper-full Stage 2: LoRA fine-tune.
 
     Pass music_dir=WHISPER_FULLRES_MUSIC_DIR and experiment_tag='whisper_fullres'
     to run the per-chunk-pooling variant without duplicating this function.
+
+    seed: set_seed before get_peft_model (LoRA init) + data_seed for shuffle order.
+    push: False → save adapter locally only, skip HF upload (seed runs must not
+          clobber the canonical avqa_stage2_{tag}/ subfolder on HF).
     """
+    from transformers import set_seed
     from peft import get_peft_model
     from avqa.dataset import AVQADataset
     from avqa.eval_utils import evaluate_avqa, AVQAEvalCallback
 
+    set_seed(seed)
     if music_dir is None:
         music_dir = WHISPER_FULL_MUSIC_DIR
 
@@ -1537,9 +1559,19 @@ def run_avqa_whisper_full_stage2(model, processor, lora_config,
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
+    # Default (1-epoch) runs keep the original step-based saving for crash recovery.
+    # Multi-epoch runs save once per epoch and keep them all, so each epoch's checkpoint
+    # can be full-tested afterwards to pick the best (guards against late-epoch overfit).
+    if num_train_epochs > 1:
+        save_kwargs = {'save_strategy': 'epoch', 'save_total_limit': num_train_epochs}
+    else:
+        save_kwargs = {'save_strategy': 'steps', 'save_steps': 100, 'save_total_limit': 1}
+
     sft_config = SFTConfig(**{
         'output_dir':                      output_dir,
-        'num_train_epochs':                1,
+        'seed':                            seed,
+        'data_seed':                       seed,
+        'num_train_epochs':                num_train_epochs,
         'per_device_train_batch_size':     4,
         'per_device_eval_batch_size':      4,
         'gradient_accumulation_steps':     4,
@@ -1555,10 +1587,8 @@ def run_avqa_whisper_full_stage2(model, processor, lora_config,
         'dataloader_pin_memory':           True,
         'logging_steps':                   10,
         'eval_strategy':                   'steps',
-        'eval_steps':                      100,
-        'save_strategy':                   'steps',
-        'save_steps':                      100,
-        'save_total_limit':                1,
+        'eval_steps':                      250,
+        **save_kwargs,
         'load_best_model_at_end':          False,
         'gradient_checkpointing':          True,
         'gradient_checkpointing_kwargs':   {'use_reentrant': False},
@@ -1598,7 +1628,11 @@ def run_avqa_whisper_full_stage2(model, processor, lora_config,
     if wandb.run is not None:
         wandb.finish()
 
-    push_avqa_whisper_full_stage2(trainer, experiment_tag=experiment_tag)
+    if push:
+        push_avqa_whisper_full_stage2(trainer, experiment_tag=experiment_tag)
+    else:
+        trainer.save_model(trainer.args.output_dir)
+        print(f"[seed={seed}] Stage 2 adapter saved locally (no HF push): {trainer.args.output_dir}")
     return trainer
 
 
@@ -2045,7 +2079,8 @@ AVQA_WHISPER_FULLRES_V2_STAGE2_DIR = '/workspace/projects/speech/avqa_stage2_whi
 
 def run_avqa_whisper_fullres_v2_stage1(model=None, processor=None,
                                        train_dataset=None, val_dataset=None,
-                                       output_dir=None, resume_from_checkpoint=None):
+                                       output_dir=None, resume_from_checkpoint=None,
+                                       seed=42, push=True):
     run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
     return run_avqa_whisper_full_stage1(
         model=model, processor=processor,
@@ -2054,6 +2089,7 @@ def run_avqa_whisper_fullres_v2_stage1(model=None, processor=None,
         resume_from_checkpoint=resume_from_checkpoint,
         music_dir=WHISPER_FULLRES_MUSIC_DIR,
         experiment_tag='whisper_fullres_v2',
+        seed=seed, push=push,
     )
 
 
@@ -2103,7 +2139,8 @@ def setup_avqa_whisper_fullres_v3_stage2(checkpoint_path=HF_REPO,
 
 def run_avqa_whisper_fullres_v3_stage2(model, processor, lora_config,
                                        train_dataset=None, val_dataset=None,
-                                       output_dir=None, resume_from_checkpoint=None):
+                                       output_dir=None, resume_from_checkpoint=None,
+                                       seed=42, push=True):
     run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
     return run_avqa_whisper_full_stage2(
         model=model, processor=processor, lora_config=lora_config,
@@ -2112,4 +2149,86 @@ def run_avqa_whisper_fullres_v3_stage2(model, processor, lora_config,
         resume_from_checkpoint=resume_from_checkpoint,
         music_dir=WHISPER_FULLRES_MUSIC_DIR,
         experiment_tag='whisper_fullres_v3',
+        seed=seed, push=push,
+    )
+
+
+# ── AVQA whisper_fullres_notts: text questions instead of TTS→Whisper ─────────
+# Motivation: reviewer objected to routing clean text through TTS→Whisper (4.71% WER).
+#   Passing questions as text tokens removes that lossy channel.
+# Design (revised 2026-06-11): train BOTH stages with text questions on the usual 8k
+#   data budget — same as v2/v3 — so the ONLY difference vs v3 is TTS→text throughout.
+#   - Stage 1 (this run) trains music_projector with text_question=True, so the projector
+#     co-adapts to the text-question context it will actually operate in. (Earlier attempt
+#     reused the TTS-trained avqa_stage1_whisper_fullres_v2 and got 71.36% — question-
+#     ignoring; see training_history.md. Suspected cause: projector trained in TTS context,
+#     mismatched at Stage 2. Training Stage 1 with text removes that confound.)
+#   - Stage 2: LoRA on LLM + music_projector. audio_projector excluded from modules_to_save
+#     (it is never invoked — no TTS audio path in text mode).
+# Comparison: 8k/8k like every other run → drops straight into the results table vs v3.
+# Expected: accuracy ≥ 97.31% if text questions are genuinely fine.
+
+AVQA_WHISPER_FULLRES_NOTTS_STAGE1_DIR = '/workspace/projects/speech/avqa_stage1_whisper_fullres_notts_checkpoint'
+AVQA_WHISPER_FULLRES_NOTTS_STAGE2_DIR = '/workspace/projects/speech/avqa_stage2_whisper_fullres_notts_checkpoint'
+
+
+def run_avqa_whisper_fullres_notts_stage1(model=None, processor=None,
+                                          output_dir=None, resume_from_checkpoint=None):
+    """Stage 1 for the notts variant: music_projector trained with TEXT questions.
+
+    Builds text-question datasets (text_question=True → no TTS audio) and delegates to
+    run_avqa_whisper_full_stage1. The model/architecture is identical to v2 Stage 1
+    (init_avqa_whisper_model); only the question is delivered as text tokens instead of
+    TTS→Whisper audio, so the music_projector co-adapts to the text context.
+    Pushes to HF subfolder avqa_stage1_whisper_fullres_notts.
+    """
+    from avqa.dataset import AVQADataset
+    run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+    train_dataset = AVQADataset(split='train', max_samples=8000,
+                                music_dir=WHISPER_FULLRES_MUSIC_DIR,
+                                require_video=False, text_question=True)
+    val_dataset   = AVQADataset(split='val',
+                                music_dir=WHISPER_FULLRES_MUSIC_DIR,
+                                require_video=False, text_question=True)
+    return run_avqa_whisper_full_stage1(
+        model=model, processor=processor,
+        train_dataset=train_dataset, val_dataset=val_dataset,
+        output_dir=output_dir or f"{AVQA_WHISPER_FULLRES_NOTTS_STAGE1_DIR}_{run_id}",
+        resume_from_checkpoint=resume_from_checkpoint,
+        music_dir=WHISPER_FULLRES_MUSIC_DIR,
+        experiment_tag='whisper_fullres_notts',
+    )
+
+
+def setup_avqa_whisper_fullres_notts_stage2(checkpoint_path=HF_REPO,
+                                            subfolder='avqa_stage1_whisper_fullres_notts',
+                                            processor_path='/workspace/projects/speech/processor'):
+    """Load the TEXT-trained notts Stage 1 checkpoint (not the TTS v2 one) for Stage 2."""
+    return setup_avqa_whisper_stage2(
+        checkpoint_path=checkpoint_path,
+        subfolder=subfolder,
+        processor_path=processor_path,
+        modules_to_save=['music_projector'],
+    )
+
+
+def run_avqa_whisper_fullres_notts_stage2(model, processor, lora_config,
+                                          output_dir=None, resume_from_checkpoint=None,
+                                          num_train_epochs=1):
+    from avqa.dataset import AVQADataset
+    run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+    train_dataset = AVQADataset(split='train', max_samples=8000,
+                                music_dir=WHISPER_FULLRES_MUSIC_DIR,
+                                require_video=False, text_question=True)
+    val_dataset   = AVQADataset(split='val',
+                                music_dir=WHISPER_FULLRES_MUSIC_DIR,
+                                require_video=False, text_question=True)
+    return run_avqa_whisper_full_stage2(
+        model=model, processor=processor, lora_config=lora_config,
+        train_dataset=train_dataset, val_dataset=val_dataset,
+        output_dir=output_dir or f"{AVQA_WHISPER_FULLRES_NOTTS_STAGE2_DIR}_{run_id}",
+        resume_from_checkpoint=resume_from_checkpoint,
+        music_dir=WHISPER_FULLRES_MUSIC_DIR,
+        experiment_tag='whisper_fullres_notts',
+        num_train_epochs=num_train_epochs,
     )

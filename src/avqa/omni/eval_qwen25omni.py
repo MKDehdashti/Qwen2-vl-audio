@@ -1,15 +1,37 @@
+# ============================================================================
+# ⚠️  DO NOT USE FOR THE PAPER — INVALID ZERO-SHOT BASELINE.  ⚠️
+#
+# THE BUG: this script gives the base model only 8 frames + the QUESTION TEXT.
+# It passes NO AUDIO. But the fine-tuned Omni (80.91%) was given frames + the
+# music audio track + the TTS-spoken question. So the published 38.42% compared
+# two different input regimes — the gap measured "no audio vs audio", not
+# "no fine-tuning vs fine-tuning". (A second bug in the original v1 run also left
+# <LR>/<Object>/... placeholders unfilled in 69.4% of questions; that part is
+# fixed here, but the no-audio flaw above remains and cannot be fixed in this
+# frames+text design.)
+#
+# THE FIX: use  eval_qwen25omni_audiomatched.py  instead. It feeds the base model
+# the EXACT same inputs as the fine-tuned run (frames + music audio + TTS question)
+# via the shared AVQADatasetOmni + make_messages path, so the ONLY difference is
+# the LoRA adapter. It is crash-safe (resumes) and reports exact/lenient ×
+# normalized/raw, with exact_norm @ max_new_tokens=5 as the headline.
+# ============================================================================
 """
 Zero-shot Qwen2.5-Omni-7B evaluation on MUSIC-AVQA test set.
 
-Passes video (with embedded audio) + text question — no fine-tuning, no TTS.
-Filters to the same 7,402 samples used in all other experiments (available videos).
+Passes 8 video frames + text question — no fine-tuning, no TTS.
+Uses precomputed frames from video_frames/ (original mp4s were removed in repo cleanup;
+the original run also passed only 8 frames + text — no audio — so the protocol is unchanged).
+Filters to the same samples used in all other experiments (available frames).
 Scoring: identical to eval_utils.py — _normalise() + exact string match.
 
 Usage:
     source .venv/bin/activate
     python src/avqa/eval_qwen25omni.py
 
-Results saved to: qwen25omni_avqa_results.json
+Results saved to: qwen25omni_avqa_results_v2.json
+(v1 = qwen25omni_avqa_results.json — INVALID: fill_placeholders bug left <LR>/<Object>/...
+placeholders unfilled in 69.4% of questions; kept only as a record of the buggy run.)
 """
 
 import json
@@ -20,11 +42,16 @@ from pathlib import Path
 import torch
 from tqdm import tqdm
 
+_src = str(Path(__file__).resolve().parents[2])
+if _src not in sys.path:
+    sys.path.append(_src)
+from avqa.dataset import fill_placeholders  # noqa: E402
+
 # ── Paths ──────────────────────────────────────────────────────────────────────
 DATASET_DIR = Path('/workspace/projects/speech/music_avqa_dataset')
-VIDEO_DIR   = DATASET_DIR / 'data' / 'video' / 'MUSIC-AVQA-videos-Real'
-TEST_JSON   = DATASET_DIR / 'data' / 'json_update' / 'avqa-test.json'
-OUT_FILE    = Path('/workspace/projects/speech/qwen25omni_avqa_results.json')
+FRAMES_DIR  = DATASET_DIR / 'data' / 'video_frames'   # (8, H, W, 3) uint8 .npy per video
+TEST_JSON   = DATASET_DIR / 'data' / 'json' / 'avqa-test.json'
+OUT_FILE    = Path('/workspace/projects/speech/qwen25omni_avqa_results_v2.json')
 
 MODEL_ID    = 'Qwen/Qwen2.5-Omni-7B'
 
@@ -33,18 +60,6 @@ SYSTEM_PROMPT = (
     "Answer each question with only a single word or short phrase. "
     "Do not explain your answer."
 )
-
-
-def fill_placeholders(text: str, templ_values_str: str) -> str:
-    """Identical to src/avqa/dataset.py — fills <Placeholder> tokens."""
-    try:
-        values = json.loads(templ_values_str)
-    except Exception:
-        values = []
-    for val in values:
-        text = text.replace('<Placeholder>', val, 1)
-    text = text.replace('_', ' ')
-    return text
 
 
 def _normalise(text: str) -> str:
@@ -68,7 +83,8 @@ def load_model():
     return model, processor
 
 
-def run_inference(model, processor, video_path: str, question: str) -> str:
+def run_inference(model, processor, frames: list, question: str) -> str:
+    """frames: list of 8 PIL Images (precomputed, same as fine-tuned runs)."""
     from qwen_vl_utils import process_vision_info
 
     messages = [
@@ -78,8 +94,7 @@ def run_inference(model, processor, video_path: str, question: str) -> str:
             "content": [
                 {
                     "type": "video",
-                    "video": video_path,
-                    "nframes": 8,        # match our model's frame count
+                    "video": frames,     # pre-extracted frames — match our model's frame count
                 },
                 {
                     "type": "text",
@@ -115,9 +130,9 @@ def run_inference(model, processor, video_path: str, question: str) -> str:
 def evaluate():
     # ── Load test data ─────────────────────────────────────────────────────────
     samples = json.loads(TEST_JSON.read_text())
-    # Filter to available videos (same as all other experiments)
-    samples = [s for s in samples if (VIDEO_DIR / f"{s['video_id']}.mp4").exists()]
-    print(f"Test samples with available video: {len(samples)}")
+    # Filter to available precomputed frames (same as all other experiments)
+    samples = [s for s in samples if (FRAMES_DIR / f"{s['video_id']}.npy").exists()]
+    print(f"Test samples with available frames: {len(samples)}")
 
     # ── Resume support ─────────────────────────────────────────────────────────
     done: dict[str, dict] = {}
@@ -137,12 +152,15 @@ def evaluate():
     # ── Inference loop ─────────────────────────────────────────────────────────
     results = list(done.values())
     for sample in tqdm(remaining, desc='Qwen2.5-Omni zero-shot'):
-        video_path = str(VIDEO_DIR / f"{sample['video_id']}.mp4")
+        import numpy as np
+        from PIL import Image
+        frames_arr = np.load(FRAMES_DIR / f"{sample['video_id']}.npy")  # (8, H, W, 3) uint8
+        frames     = [Image.fromarray(frames_arr[i]) for i in range(len(frames_arr))]
         question   = fill_placeholders(sample['question_content'], sample['templ_values'])
         gt         = _normalise(sample['anser'])
 
         try:
-            raw     = run_inference(model, processor, video_path, question)
+            raw     = run_inference(model, processor, frames, question)
             pred    = _normalise(raw)
             correct = int(pred == gt)
         except Exception as e:

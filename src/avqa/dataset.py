@@ -85,6 +85,7 @@ class AVQADataset(Dataset):
         require_music: bool = True,
         require_tts: bool = True,
         add_frame_timestamps: bool = False,
+        text_question: bool = False,
     ):
         self.video_dir    = Path(video_dir)
         self.music_dir    = Path(music_dir)
@@ -92,6 +93,9 @@ class AVQADataset(Dataset):
         self.frames_dir   = Path(frames_dir) if frames_dir is not None else None
         self.video_nframes = video_nframes
         self.add_frame_timestamps = add_frame_timestamps
+        self.text_question = text_question
+        if text_question:
+            require_tts = False  # no .wav files needed
         self._durations: dict = {}
         if add_frame_timestamps:
             dur_path = Path(music_dir) / DURATIONS_FILE
@@ -128,10 +132,12 @@ class AVQADataset(Dataset):
                 continue
 
             self.items.append({
-                "video_id":      vid,
-                "question_id":   qid,
-                "answer":        item["anser"],   # dataset typo — intentional
-                "question_type": item.get("type", ""),
+                "video_id":         vid,
+                "question_id":      qid,
+                "answer":           item["anser"],   # dataset typo — intentional
+                "question_type":    item.get("type", ""),
+                "question_content": item.get("question_content", ""),
+                "templ_values":     item.get("templ_values", "[]"),
             })
 
         if max_samples is not None:
@@ -156,7 +162,6 @@ class AVQADataset(Dataset):
         qid  = item["question_id"]
 
         music_features = np.load(self.music_dir / f"{vid}.npy").astype(np.float32)
-        tts_bytes      = (self.tts_dir / f"{qid}.wav").read_bytes()
 
         # Use precomputed frames (list of PIL Images) if available — avoids mp4 decoding.
         frames_path = self.frames_dir / f"{vid}.npy" if self.frames_dir is not None else None
@@ -167,13 +172,24 @@ class AVQADataset(Dataset):
         else:
             video_val = str(self._find_video(vid))
 
-        sample = {
-            "video":          video_val,
-            "video_nframes":  self.video_nframes,  # fixed frame count regardless of clip length
-            "music":          True,                # signals format_data to insert music placeholder
-            "audio":          tts_bytes,           # TTS question bytes → Whisper encoder
-            "answer":         item["answer"],
-        }
+        if self.text_question:
+            question_text = fill_placeholders(item["question_content"], item["templ_values"])
+            sample = {
+                "video":          video_val,
+                "video_nframes":  self.video_nframes,
+                "music":          True,
+                "question_text":  question_text,   # text token path — no Whisper encoding
+                "answer":         item["answer"],
+            }
+        else:
+            tts_bytes = (self.tts_dir / f"{qid}.wav").read_bytes()
+            sample = {
+                "video":          video_val,
+                "video_nframes":  self.video_nframes,
+                "music":          True,
+                "audio":          tts_bytes,        # TTS question bytes → Whisper encoder
+                "answer":         item["answer"],
+            }
 
         messages = format_data(sample)
 

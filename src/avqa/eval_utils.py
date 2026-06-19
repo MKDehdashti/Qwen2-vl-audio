@@ -35,6 +35,33 @@ def _normalise(text: str) -> str:
     return re.sub(r"[^\w\s]", "", text.lower()).strip()
 
 
+# Extra scoring variants (additive — DO NOT change the headline exact_norm metric,
+# which equals the v3 / Omni published numbers). Identical definitions to the
+# Qwen2.5-Omni audio-matched baseline (eval_qwen25omni_audiomatched.py) so all
+# models are scored apple-to-apple.
+METRICS = ("exact_norm", "exact_raw", "lenient_norm", "lenient_raw")
+
+
+def _phrase_in(needle: str, haystack: str) -> bool:
+    """True if `needle` occurs as a contiguous whole-word phrase inside `haystack`."""
+    return bool(needle) and f" {needle} " in f" {haystack} "
+
+
+def score_record(raw_pred: str, raw_gt: str) -> dict:
+    """All four metrics for one (prediction, ground-truth) pair, from raw text.
+
+    exact_norm == the existing headline metric (_normalise + exact match).
+    """
+    pn, gn = _normalise(raw_pred), _normalise(raw_gt)
+    pr, gr = raw_pred.strip(),     raw_gt.strip()
+    return {
+        "exact_norm":   int(pn == gn),
+        "exact_raw":    int(pr == gr),
+        "lenient_norm": int(_phrase_in(gn, pn)),
+        "lenient_raw":  int(_phrase_in(gr, pr)),
+    }
+
+
 def run_avqa_inference(model, processor, item: dict, max_new_tokens: int = 10) -> str:
     """Run inference on a single AVQADataset item. Returns the model's answer string."""
     messages       = item["messages"]
@@ -152,7 +179,7 @@ def _run_batch_inference(model, processor, items: list[dict], max_new_tokens: in
 
 
 def evaluate_avqa(model, processor, dataset, n=100, tag="eval", step=None,
-                  batch_size=4, max_new_tokens=5):
+                  batch_size=4, max_new_tokens=5, detailed=False):
     """Run inference on n samples and compute accuracy + per-type breakdown.
 
     Args:
@@ -164,16 +191,23 @@ def evaluate_avqa(model, processor, dataset, n=100, tag="eval", step=None,
         step:           W&B global step for chart alignment.
         batch_size:     Samples per forward pass (default 4; set 1 to match old behaviour).
         max_new_tokens: Cap on generated tokens (default 5; AVQA answers are ≤3 tokens).
+        detailed:       If True, also print the exact/lenient × normalized/raw grid and a
+                        multi-line per-type breakdown. Purely additive — the headline
+                        `accuracy` (== exact_norm) is unchanged regardless of this flag,
+                        so v3 / Omni numbers stay reproducible. Default False (callers
+                        during training are byte-for-byte unaffected).
 
     Returns:
-        dict with keys: accuracy, n_correct, n_evaluated,
-                        and per_type: {type_str: accuracy}
+        dict with keys: accuracy, n_correct, n_evaluated, per_type: {type_str: accuracy},
+                        and metrics: {exact_norm, exact_raw, lenient_norm, lenient_raw}.
+                        accuracy == metrics['exact_norm'] by construction.
     """
     model.eval()
     n = min(n, len(dataset))
 
     correct  = 0
     per_type: dict[str, list[bool]] = {}
+    metric_tot = {m: 0 for m in METRICS}   # additive extra metrics
 
     def load_and_preprocess(start):
         items = [dataset[i] for i in range(start, min(start + batch_size, n))]
@@ -188,7 +222,8 @@ def evaluate_avqa(model, processor, dataset, n=100, tag="eval", step=None,
         for batch_start in pbar:
             # Wait for current batch's CPU preprocessing to finish
             batch_items, inputs_cpu = future.result()
-            gts = [_normalise(item["answer"]) for item in batch_items]
+            raw_gts = [item["answer"] for item in batch_items]
+            gts     = [_normalise(g) for g in raw_gts]
 
             # Immediately kick off preprocessing of NEXT batch in background
             # (overlaps CPU work with GPU inference below)
@@ -198,7 +233,8 @@ def evaluate_avqa(model, processor, dataset, n=100, tag="eval", step=None,
 
             try:
                 if batch_size == 1:
-                    preds = [_normalise(run_avqa_inference(model, processor, batch_items[0]))]
+                    raw_preds = [run_avqa_inference(model, processor, batch_items[0])]
+                    preds     = [_normalise(raw_preds[0])]
                 else:
                     # Pin memory → faster CPU→GPU transfer
                     inputs_gpu = {
@@ -213,11 +249,12 @@ def evaluate_avqa(model, processor, dataset, n=100, tag="eval", step=None,
                             max_new_tokens=max_new_tokens,
                             pad_token_id=processor.tokenizer.pad_token_id,
                         )
-                    preds = [
-                        _normalise(processor.tokenizer.decode(
-                            seq[prompt_len:], skip_special_tokens=True).strip())
+                    raw_preds = [
+                        processor.tokenizer.decode(
+                            seq[prompt_len:], skip_special_tokens=True).strip()
                         for seq in generated
                     ]
+                    preds = [_normalise(p) for p in raw_preds]
             except Exception as e:
                 print(f"\n  [avqa_eval] batch {batch_start} failed: {e}")
                 continue
@@ -225,6 +262,11 @@ def evaluate_avqa(model, processor, dataset, n=100, tag="eval", step=None,
             for i, (gt, pred) in enumerate(zip(gts, preds)):
                 is_correct = pred == gt
                 correct   += int(is_correct)
+                # Additive: accumulate the 4-metric grid from raw text.
+                # sc['exact_norm'] == int(is_correct) by construction.
+                sc = score_record(raw_preds[i], raw_gts[i])
+                for m in METRICS:
+                    metric_tot[m] += sc[m]
                 try:
                     q_type = json.loads(batch_items[i]["question_type"])
                     keys = q_type + [" / ".join(q_type)]
@@ -246,6 +288,7 @@ def evaluate_avqa(model, processor, dataset, n=100, tag="eval", step=None,
         "n_correct":   correct,
         "n_evaluated": n,
         "per_type":    {k: sum(v) / len(v) for k, v in per_type.items()},
+        "metrics":     {m: metric_tot[m] / n for m in METRICS},  # additive grid
     }
 
     print(
@@ -254,8 +297,27 @@ def evaluate_avqa(model, processor, dataset, n=100, tag="eval", step=None,
                     if "/" in k)
     )
 
+    if detailed:
+        bar = "─" * 64
+        print(bar)
+        print(f"[{tag}] scoring grid (n={n}) | max_new_tokens={max_new_tokens}")
+        print("  metric          normalized      raw")
+        print(f'  exact      {metric_tot["exact_norm"]/n*100:9.2f}%  {metric_tot["exact_raw"]/n*100:9.2f}%')
+        print(f'  lenient    {metric_tot["lenient_norm"]/n*100:9.2f}%  {metric_tot["lenient_raw"]/n*100:9.2f}%')
+        print(bar)
+        print(f'  HEADLINE (exact_norm, == accuracy): {accuracy*100:.2f}%  ({correct}/{n})')
+        print(bar)
+        print("Per-type (exact_norm):")
+        for k in sorted(per_type):
+            if "/" in k:   # joined question-type keys (matches Omni breakdown)
+                c, t = sum(per_type[k]), len(per_type[k])
+                print(f"  {k:<38} {c/t*100:6.2f}%  ({c}/{t})")
+        print(bar)
+
     if wandb.run is not None:
         log = {f"{tag}/accuracy": accuracy, f"{tag}/n_evaluated": n}
+        for m, v in results["metrics"].items():
+            log[f"{tag}/{m}"] = v
         for k, v in results["per_type"].items():
             log[f"{tag}/type/{k}"] = v
         wandb.log(log, step=step)

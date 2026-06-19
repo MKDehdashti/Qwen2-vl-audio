@@ -218,10 +218,11 @@ def format_data(sample):
     # Collect all modality content blocks present in this sample
     user_content = []
 
-    has_audio = "wav" in sample or "audio" in sample
-    has_image = "image" in sample
-    has_video = "video" in sample
-    has_music = bool(sample.get("music"))   # PANNs music track placeholder
+    has_audio         = "wav" in sample or "audio" in sample
+    has_image         = "image" in sample
+    has_video         = "video" in sample
+    has_music         = bool(sample.get("music"))   # PANNs music track placeholder
+    has_question_text = "question_text" in sample   # no-TTS: question as text tokens
 
     if has_video:
         video_item = {"type": "video", "video": sample["video"]}
@@ -260,12 +261,12 @@ def format_data(sample):
 
     # Choose system message and user prompt based on modalities present.
     if has_music:
-        # Audio-visual QA: question is spoken (audio), music track and video are context.
         system = (
             "You are an audio-visual question answering assistant. "
             "Answer with a single word or short phrase."
         )
-        prompt = "Answer the question."
+        # no-TTS: question is plain text; TTS path: question is encoded audio + static prompt
+        prompt = sample["question_text"] if has_question_text else "Answer the question."
     elif sum([has_audio, has_image, has_video]) > 1:
         system = "You are a multimodal assistant."
         prompt = "Describe what you see and hear."
