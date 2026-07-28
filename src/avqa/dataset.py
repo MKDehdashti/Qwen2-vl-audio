@@ -86,6 +86,7 @@ class AVQADataset(Dataset):
         require_tts: bool = True,
         add_frame_timestamps: bool = False,
         text_question: bool = False,
+        match_wrapper: bool = False,
     ):
         self.video_dir    = Path(video_dir)
         self.music_dir    = Path(music_dir)
@@ -94,6 +95,12 @@ class AVQADataset(Dataset):
         self.video_nframes = video_nframes
         self.add_frame_timestamps = add_frame_timestamps
         self.text_question = text_question
+        # match_wrapper: text arm mirrors the TTS arm structurally. TTS user turn is
+        # [video, music, <audio question>, "Answer the question."]; with match_wrapper the
+        # text user turn becomes [video, music, <text question>, "Answer the question."],
+        # so the ONLY difference between arms is the question's pathway (audio vs text region),
+        # not the presence of the generic instruction. Single-variable control for sec:delivery.
+        self.match_wrapper = match_wrapper and text_question
         if text_question:
             require_tts = False  # no .wav files needed
         self._durations: dict = {}
@@ -192,6 +199,12 @@ class AVQADataset(Dataset):
             }
 
         messages = format_data(sample)
+
+        if self.match_wrapper:
+            # text arm: append the generic instruction so the turn mirrors the TTS arm
+            # [video, music, <text question>, "Answer the question."]. Single-variable swap.
+            user_turn = next(m for m in messages if m["role"] == "user")
+            user_turn["content"].append({"type": "text", "text": "Answer the question."})
 
         if self.add_frame_timestamps:
             n_audio   = music_features.shape[0]

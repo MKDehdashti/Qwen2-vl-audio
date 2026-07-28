@@ -2173,37 +2173,57 @@ AVQA_WHISPER_FULLRES_NOTTS_STAGE2_DIR = '/workspace/projects/speech/avqa_stage2_
 
 
 def run_avqa_whisper_fullres_notts_stage1(model=None, processor=None,
-                                          output_dir=None, resume_from_checkpoint=None):
+                                          output_dir=None, resume_from_checkpoint=None,
+                                          match_wrapper=False):
     """Stage 1 for the notts variant: music_projector trained with TEXT questions.
 
     Builds text-question datasets (text_question=True → no TTS audio) and delegates to
     run_avqa_whisper_full_stage1. The model/architecture is identical to v2 Stage 1
     (init_avqa_whisper_model); only the question is delivered as text tokens instead of
     TTS→Whisper audio, so the music_projector co-adapts to the text context.
-    Pushes to HF subfolder avqa_stage1_whisper_fullres_notts.
+
+    match_wrapper=False (default): the bare notts arm — question text REPLACES the prompt.
+      Pushes to HF subfolder avqa_stage1_whisper_fullres_notts (the original notts).
+    match_wrapper=True: single-variable control for sec:delivery — the text arm mirrors the
+      TTS arm [video, music, text(Q), "Answer the question."], so the ONLY difference vs TTS
+      is the question's pathway. Distinct tag → avqa_stage1_whisper_fullres_notts_matched
+      (never clobbers the original notts). Threaded into BOTH datasets.
     """
     from avqa.dataset import AVQADataset
     run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+    tag    = 'whisper_fullres_notts_matched' if match_wrapper else 'whisper_fullres_notts'
+    suffix = '_matched' if match_wrapper else ''
     train_dataset = AVQADataset(split='train', max_samples=8000,
                                 music_dir=WHISPER_FULLRES_MUSIC_DIR,
-                                require_video=False, text_question=True)
+                                require_video=False, text_question=True,
+                                match_wrapper=match_wrapper)
     val_dataset   = AVQADataset(split='val',
                                 music_dir=WHISPER_FULLRES_MUSIC_DIR,
-                                require_video=False, text_question=True)
+                                require_video=False, text_question=True,
+                                match_wrapper=match_wrapper)
     return run_avqa_whisper_full_stage1(
         model=model, processor=processor,
         train_dataset=train_dataset, val_dataset=val_dataset,
-        output_dir=output_dir or f"{AVQA_WHISPER_FULLRES_NOTTS_STAGE1_DIR}_{run_id}",
+        output_dir=output_dir or f"{AVQA_WHISPER_FULLRES_NOTTS_STAGE1_DIR}{suffix}_{run_id}",
         resume_from_checkpoint=resume_from_checkpoint,
         music_dir=WHISPER_FULLRES_MUSIC_DIR,
-        experiment_tag='whisper_fullres_notts',
+        experiment_tag=tag,
     )
 
 
 def setup_avqa_whisper_fullres_notts_stage2(checkpoint_path=HF_REPO,
-                                            subfolder='avqa_stage1_whisper_fullres_notts',
-                                            processor_path='/workspace/projects/speech/processor'):
-    """Load the TEXT-trained notts Stage 1 checkpoint (not the TTS v2 one) for Stage 2."""
+                                            subfolder=None,
+                                            processor_path='/workspace/projects/speech/processor',
+                                            match_wrapper=False):
+    """Load the TEXT-trained notts Stage 1 checkpoint (not the TTS v2 one) for Stage 2.
+
+    subfolder=None → defaults to the notts Stage 1 subfolder matching match_wrapper:
+      avqa_stage1_whisper_fullres_notts (bare) or ..._notts_matched (matched control).
+    An explicit subfolder= always wins (e.g. resuming a specific run).
+    """
+    if subfolder is None:
+        subfolder = ('avqa_stage1_whisper_fullres_notts_matched' if match_wrapper
+                     else 'avqa_stage1_whisper_fullres_notts')
     return setup_avqa_whisper_stage2(
         checkpoint_path=checkpoint_path,
         subfolder=subfolder,
@@ -2214,21 +2234,28 @@ def setup_avqa_whisper_fullres_notts_stage2(checkpoint_path=HF_REPO,
 
 def run_avqa_whisper_fullres_notts_stage2(model, processor, lora_config,
                                           output_dir=None, resume_from_checkpoint=None,
-                                          num_train_epochs=1):
+                                          num_train_epochs=1, match_wrapper=False):
+    """Stage 2 LoRA for the notts variant. match_wrapper=True → matched control:
+    datasets mirror the TTS arm and push to avqa_stage2_whisper_fullres_notts_matched
+    (never clobbers the original notts). Must match the Stage 1 / setup match_wrapper."""
     from avqa.dataset import AVQADataset
     run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+    tag    = 'whisper_fullres_notts_matched' if match_wrapper else 'whisper_fullres_notts'
+    suffix = '_matched' if match_wrapper else ''
     train_dataset = AVQADataset(split='train', max_samples=8000,
                                 music_dir=WHISPER_FULLRES_MUSIC_DIR,
-                                require_video=False, text_question=True)
+                                require_video=False, text_question=True,
+                                match_wrapper=match_wrapper)
     val_dataset   = AVQADataset(split='val',
                                 music_dir=WHISPER_FULLRES_MUSIC_DIR,
-                                require_video=False, text_question=True)
+                                require_video=False, text_question=True,
+                                match_wrapper=match_wrapper)
     return run_avqa_whisper_full_stage2(
         model=model, processor=processor, lora_config=lora_config,
         train_dataset=train_dataset, val_dataset=val_dataset,
-        output_dir=output_dir or f"{AVQA_WHISPER_FULLRES_NOTTS_STAGE2_DIR}_{run_id}",
+        output_dir=output_dir or f"{AVQA_WHISPER_FULLRES_NOTTS_STAGE2_DIR}{suffix}_{run_id}",
         resume_from_checkpoint=resume_from_checkpoint,
         music_dir=WHISPER_FULLRES_MUSIC_DIR,
-        experiment_tag='whisper_fullres_notts',
+        experiment_tag=tag,
         num_train_epochs=num_train_epochs,
     )

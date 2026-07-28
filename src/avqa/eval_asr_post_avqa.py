@@ -5,7 +5,9 @@ Loads the whisper_fullres_v2 Stage 2 model (base + LoRA adapter) and runs
 LibriSpeech test-clean through the TTS/ASR audio pathway to check whether
 AVQA training degraded transcription quality.
 
-Baseline: WER 3.65% (ASR Stage 2, pre-AVQA)
+Baseline: WER 5.09% (n=500, normalized) — the Stage-2 merged root weights that initialize AVQA.
+(4.71% = lora_stage3 LibriSpeech-adapted variant, never merged into root; 3.65% = its n=100
+unnormalized final. Neither is the AVQA init — verified via HF root-shard commit history 2026-07-13.)
 
 Usage:
     source /workspace/projects/speech/setup.sh
@@ -150,9 +152,9 @@ def main():
 
     wer_val = wer(references, hypotheses)
     cer_val = cer(references, hypotheses)
-    delta   = wer_val - 0.0365
+    delta   = wer_val - 0.0509
     print(f"\n[post-avqa WER] WER: {wer_val:.4f}  CER: {cer_val:.4f}  (n={len(references)})")
-    print(f"[post-avqa WER] Baseline (pre-AVQA): WER 0.0365")
+    print(f"[post-avqa WER] Baseline (pre-AVQA, Stage-2 merged root, n=500 normalized): WER 0.0509")
     print(f"[post-avqa WER] Delta: {delta:+.4f} ({'degraded' if delta > 0 else 'improved/unchanged'})")
 
 

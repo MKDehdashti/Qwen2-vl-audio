@@ -34,9 +34,18 @@ librosa
 soundfile
 jiwer
 edge-tts
+panns_inference        # PANNs CNN14 feature extraction (src/avqa/panns_preprocess.py)
+openai-whisper         # EnglishTextNormalizer for WER scoring (imports as `whisper`)
 
 # ---- Vision ----
 Pillow
+
+# ---- Core utilities (imported directly by src/; usually transitive, pinned here explicitly) ----
+numpy
+tqdm
+requests
+imageio-ffmpeg         # ffmpeg fallback for audio/frame extraction when system ffmpeg is absent
+huggingface_hub
 
 # ---- bitsandbytes (QLoRA) — not needed, A100 80GB fits 7B bfloat16 ----
 #bitsandbytes==0.47.0

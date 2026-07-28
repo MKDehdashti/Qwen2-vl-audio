@@ -44,12 +44,17 @@ The music encoder (PANNs CNN14) is not stored in the model — embeddings are pr
 
 | Model | Test Acc. |
 |---|---|
-| MUSIC-AVQA baseline (2022) | 79.42% |
-| Qwen2.5-Omni-7B zero-shot | 38.42% |
+| MUSIC-AVQA baseline (2022)* | 79.42% |
+| Qwen2.5-Omni-7B zero-shot (audio-matched) | 56.82% |
 | Qwen2.5-Omni-7B fine-tuned | 80.91% |
 | Ours — PANNs-32 | 66.87% |
 | Ours — whisper_fullres_v2 | 94.78% |
 | **Ours — whisper_fullres_v3** | **97.31%** |
+
+\* Published baselines use the **full official train/test splits**; our rows use 8,000 training pairs
+and the 7,402-pair available-video test subset, so the two blocks are not directly comparable.
+Zero-shot Omni is the audio-matched re-run (`src/avqa/omni/eval_qwen25omni_audiomatched.py`, 56.82%);
+an earlier 38.42% figure fed the model frames + text only, without audio, and is superseded.
 
 **Per-modality breakdown (v3):**
 
