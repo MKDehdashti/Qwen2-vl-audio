@@ -67,10 +67,10 @@ not directly comparable. † n=500, normalized.
 | MUSIC-AVQA / AVST baseline (2022)* | 71.6% |
 | Qwen2.5-Omni-7B zero-shot (audio-matched) | 56.82% |
 | Qwen2.5-Omni-7B fine-tuned | 80.91% |
-| Ours — `panns32`, 8 tokens (ablation) | 66.87% |
-| Ours — `panns32`, 32 tokens (ablation) | 69.9% |
+| Ours — PANNs-8 (ablation) | 66.87% |
+| Ours — `panns32` (ablation) | 69.9% |
 | Ours — `whisper32_full` (ablation) | 70.5% |
-| Ours — `whisper_fullres` (30 s) | 95.91% |
+| Ours — `whisper32` (30 s) | 95.91% |
 | Ours — `whisper_fullres_v2` | 95.49% |
 | **Ours — `whisper_fullres_v3`** | **97.31%** |
 
@@ -80,10 +80,14 @@ internal labels. Mapping:
 | Repo / W&B / HF | Paper |
 |---|---|
 | `whisper_fullres_v3` | Whisper-60s-chunked (question projector frozen) — headline model |
-| `whisper_fullres_v2` | Whisper-60s-chunked (question projector tuned) |
-| `whisper_fullres` | Whisper-30s |
+| `whisper_fullres_v2` | Whisper-60s-chunked (question projector tuned); its Stage-1 checkpoint is shared with v3 |
+| `whisper32` | Whisper-30s |
 | `whisper32_full` | Whisper-60s-compressed |
-| `panns32` | PANNs-8 / PANNs-32 (8- or 32-token expansion) |
+| `panns32` | PANNs-32 (32-token expansion) |
+
+(PANNs-8, the earlier 8-token PANNs run, predates the naming scheme: HF `avqa_stage1/` and
+`avqa_stage2/`. The plain `whisper_fullres` run is an earlier 60 s-chunked variant not reported in the
+paper.)
 
 \* Published baselines use the **full official train/test splits**; our rows use 8,000 training pairs
 and the 7,402-pair available-video test subset, so the two blocks are not directly comparable.
@@ -106,8 +110,9 @@ All checkpoints are on HuggingFace: [`MayaKD/qwen2-vl-audio`](https://huggingfac
 
 | Checkpoint | Description |
 |---|---|
-| `avqa_stage1_whisper_fullres_v3/` | Stage 1: `music_projector` only, everything else frozen |
+| `avqa_stage1_whisper_fullres_v2/` | Stage 1 (`music_projector` only, all else frozen) — shared by v2 **and** v3 |
 | `avqa_stage2_whisper_fullres_v3/` | Stage 2: best model (97.31%) |
+| `avqa_stage2_whisper_fullres_v3_seed1234/`, `_seed2026/` | seed runs behind the 96.0% ± 3.9% figure |
 | `avqa_init/` | Base Qwen2-VL-7B with audio/music tokens added |
 
 ---
@@ -116,8 +121,8 @@ All checkpoints are on HuggingFace: [`MayaKD/qwen2-vl-audio`](https://huggingfac
 
 ```
 src/
-  train.py        # AVQA + ASR training entry points (a FUNCTION LIBRARY, not a CLI)
-  asr/            # ASR pipeline
+  train.py        # ALL training entry points, ASR + AVQA (imported as a library — see Training)
+  asr/            # ASR pipeline components used by src/train.py
     collator.py           # data collator with audio padding
     create_processor.py   # Qwen2VLProcessor + audio_processor assembly
     init_model.py         # model init + audio token injection
@@ -125,8 +130,7 @@ src/
     eval_utils.py         # WER evaluation callback
     inference.py          # single-sample inference
     wandb_utils.py        # W&B run setup
-    train.py              # legacy ASR entry points (superseded by src/train.py)
-  avqa/           # AVQA pipeline
+  avqa/           # AVQA pipeline components used by src/train.py
     dataset.py                      # AVQADataset + fill_placeholders()
     eval_utils.py                   # AVQA accuracy callback + evaluate_avqa()
     eval_asr_post_avqa.py           # ASR regression check after AVQA training
@@ -137,10 +141,10 @@ src/
     clap_preprocess.py              # CLAP features (exploratory; not used in the paper)
     tts_preprocess.py               # edge-tts question synthesis
     video_precompute.py             # frame extraction + caching
-    omni/         # Qwen2.5-Omni baseline (paper Section 4.6)
+    omni/         # Qwen2.5-Omni baseline (paper Section 4.6) — self-contained, own train script
       dataset.py                        # AVQADatasetOmni + make_messages
       collator.py
-      train.py                          # matched fine-tuning of Omni
+      train.py                          # matched LoRA fine-tuning of Qwen2.5-Omni (not via src/train.py)
       eval_qwen25omni_audiomatched.py   # zero-shot, same inputs as fine-tuned (56.82%)
       eval_qwen25omni.py                # earlier zero-shot eval (superseded)
 processor/      # Qwen2VLProcessor config (tokenizer + special tokens)
@@ -209,25 +213,21 @@ from train import (
     setup_avqa_whisper_fullres_v2_stage2,
     run_avqa_whisper_fullres_v3_stage2,     # Stage 2: LoRA, question projector FROZEN (headline)
 )
-from avqa.dataset import AVQADataset
 
-# Stage 1 — trains the music projector against a frozen LLM
+# Stage 1 — trains the music projector against a frozen LLM.
+# Let the runner build the datasets: it wires music_dir to whisper_features_fullres/ itself.
+# (Constructing AVQADataset yourself without music_dir= silently defaults to panns_features/.)
 model, processor = init_avqa_whisper_model(seed=42)
-freeze_for_avqa_whisper_stage1(model)
-run_avqa_whisper_fullres_v2_stage1(
-    model=model, processor=processor,
-    train_dataset=AVQADataset(split="train", max_samples=8000),
-    val_dataset=AVQADataset(split="val"),
-    seed=42,
-)
+freeze_for_avqa_whisper_stage1(model)   # required when passing model= (the runner then skips freezing)
+run_avqa_whisper_fullres_v2_stage1(model=model, processor=processor, seed=42)
 
 # Stage 2 — restart the kernel first (see below), then load Stage 1 and add LoRA
 model, processor, lora_config = setup_avqa_whisper_fullres_v2_stage2()
 run_avqa_whisper_fullres_v3_stage2(model, processor, lora_config, seed=42)
 ```
 
-The stage runners set `music_dir=WHISPER_FULLRES_MUSIC_DIR` internally, so the music path reads
-`whisper_features_fullres/`. Point it at `panns_features/` only to reproduce the PANNs ablation.
+Stage 2 produces the 97.31% model under the `whisper_fullres_v3` tag (same Stage-1 checkpoint as
+v2; the v3 difference is the frozen question projector).
 
 **Always restart the Python kernel between Stage 1 and Stage 2** — `gc.collect()` and
 `torch.cuda.empty_cache()` do not reliably free enough GPU memory.
