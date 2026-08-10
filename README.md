@@ -37,9 +37,12 @@ Music audio   → Whisper encoder (precomputed, stride-pooled to
               all tokens → Qwen2-VL-7B LLM → answer
 ```
 
-The **same frozen Whisper encoder** produces both the question and the music representations; only the
-two linear projectors are learned. Music features are precomputed offline and passed as
-`music_features` at training/inference time, so the music encoder is not stored in the model.
+The **same frozen Whisper encoder** produces both the question and the music representations. The only
+new modality-specific modules are the two linear projectors; Whisper and the Qwen2-VL base weights stay
+frozen throughout, and AVQA Stage 2 additionally trains LoRA adapters on the LLM's attention layers.
+Music features are precomputed offline and passed as `music_features` at training/inference time, so the
+music encoder is not stored in the model. Question audio is **not** precomputed — it is encoded by the
+same frozen Whisper encoder live in the forward pass.
 
 **Ablation variant** (`PANNs-32`, for comparison only): music audio → PANNs CNN14 → one pooled 2048-d
 vector → expanded to 32 tokens. This is what `panns_features/` is for.
@@ -183,7 +186,8 @@ Before training, precompute features from the [MUSIC-AVQA dataset](https://githu
 
 # Or recompute from scratch:
 python src/avqa/tts_preprocess.py --out_dir music_avqa_dataset/data/tts_questions
-# Whisper music features — used by the BEST model for BOTH the music and question paths
+# Whisper music features. The best model uses Whisper for both paths, but this script precomputes
+# only the music branch; question audio is encoded live in the forward pass.
 python src/avqa/whisper_preprocess_fullres.py --video_dir music_avqa_dataset/data/video \
     --out_dir music_avqa_dataset/data/whisper_features_fullres
 
