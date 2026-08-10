@@ -1,6 +1,6 @@
 # Qwen-MAVL-7B — Speech and Music Audio-Visual QA on Qwen2-VL
 
-Fine-tuning [Qwen2-VL-7B](https://huggingface.co/Qwen/Qwen2-VL-7B-Instruct) with a grafted Whisper encoder for two tasks:
+Fine-tuning [Qwen2-VL-7B-Instruct](https://huggingface.co/Qwen/Qwen2-VL-7B-Instruct) with a grafted Whisper encoder for two tasks:
 
 1. **ASR** — speech recognition via Whisper encoder + linear projection → **4.85% WER** on LibriSpeech test-clean
 2. **MUSIC-AVQA** — audio-visual question answering on music performance videos → **97.31% accuracy** on the
