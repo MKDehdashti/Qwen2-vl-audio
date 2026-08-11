@@ -1,4 +1,4 @@
-# Qwen-MAVL-7B — Speech and Music Audio-Visual QA on Qwen2-VL
+# Qwen-MusicAVQA-7B — Speech and Music Audio-Visual QA on Qwen2-VL
 
 Fine-tuning [Qwen2-VL-7B-Instruct](https://huggingface.co/Qwen/Qwen2-VL-7B-Instruct) with a grafted Whisper encoder for two tasks:
 
@@ -11,7 +11,7 @@ question *and* the music track, through two separate linear projectors. PANNs CN
 baseline**, not part of the best model — swapping Whisper's frame sequence for a PANNs pooled vector at
 the same token budget costs 26 points.
 
-Paper: *Qwen-MAVL-7B: An Efficient Modular Alternative to Omni-Modal Models for Music Audio-Visual QA*.
+Paper: *Qwen-MusicAVQA-7B: A Multi-Modal Model for Music Audio-Visual QA*.
 (The repo, W&B runs and HF checkpoints predate that name and use `qwen2-vl-audio` throughout.)
 
 Architecture diagram: [Qwen2_VL_Audio_architecture.pdf](Qwen2_VL_Audio_architecture.pdf)
@@ -251,9 +251,8 @@ Key training decisions:
 If you use this work, please cite:
 
 ```bibtex
-@misc{dehdashti2026qwenmavl,
-  title  = {Qwen-MAVL-7B: An Efficient Modular Alternative to Omni-Modal Models
-            for Music Audio-Visual QA},
+@misc{dehdashti2026qwenmusicavqa,
+  title  = {Qwen-MusicAVQA-7B: A Multi-Modal Model for Music Audio-Visual QA},
   author = {Dehdashti, Maryam},
   year   = {2026},
   url    = {https://github.com/MKDehdashti/Qwen2-vl-audio}
