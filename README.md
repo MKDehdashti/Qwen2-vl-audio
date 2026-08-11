@@ -116,7 +116,7 @@ All checkpoints are on HuggingFace: [`MayaKD/qwen2-vl-audio`](https://huggingfac
 | `avqa_stage1_whisper_fullres_v2/` | Stage 1 (`music_projector` only, all else frozen) — shared by v2 **and** v3 |
 | `avqa_stage2_whisper_fullres_v3/` | Stage 2: best model (97.31%) |
 | `avqa_stage2_whisper_fullres_v3_seed1234/`, `_seed2026/` | seed runs behind the 96.0% ± 3.9% figure |
-| `avqa_init/` | Base Qwen2-VL-7B with audio/music tokens added |
+| `avqa_init/` | Qwen2-VL-7B-Instruct with the audio/music special tokens added |
 
 ---
 
@@ -158,7 +158,8 @@ music_avqa_dataset/data/json/   # MUSIC-AVQA train/val/test splits (+ MUSIC-AVQA
 
 ## Setup
 
-Tested on RunPod A100 80GB with PyTorch 2.4.0 + CUDA 12.4.1.
+Tested on a single RunPod A100 80GB with CUDA 12.4. PyTorch comes from the RunPod template
+rather than pip (see the note at the top of `requirements.txt`).
 
 ```bash
 # 1. Clone with submodules (custom transformers fork + qwen-vl-utils)
