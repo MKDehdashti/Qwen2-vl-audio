@@ -92,6 +92,10 @@ internal labels. Mapping:
 `avqa_stage2/`. The plain `whisper_fullres` run is an earlier 60 s-chunked variant not reported in the
 paper.)
 
+The fine-tuned Omni comparison matches data, inputs, audio duration, and Stage-2 hyperparameters, but
+the systems differ in backbone and adaptation; read it as a system-level comparison rather than an
+isolated encoder comparison.
+
 \* Published baselines use the **full official train/test splits**; our rows use 8,000 training pairs
 and the 7,402-pair available-video test subset, so the two blocks are not directly comparable.
 Zero-shot Omni is the audio-matched re-run (`src/avqa/omni/eval_qwen25omni_audiomatched.py`, 56.82%);
