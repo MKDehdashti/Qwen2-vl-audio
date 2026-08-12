@@ -113,10 +113,32 @@ an earlier 38.42% figure fed the model frames + text only, without audio, and is
 
 ## Checkpoints
 
-All checkpoints are on HuggingFace: [`MayaKD/qwen2-vl-audio`](https://huggingface.co/MayaKD/qwen2-vl-audio)
+On HuggingFace: [`MayaKD/qwen2-vl-audio`](https://huggingface.co/MayaKD/qwen2-vl-audio). The **repo
+root is the merged headline model** (Stage-1 projector + Stage-2 LoRA already merged), so it loads
+in one line:
 
-| Checkpoint | Description |
+```python
+Qwen2VLDualAudioForConditionalGeneration.from_pretrained("MayaKD/qwen2-vl-audio", torch_dtype="bfloat16")
+```
+
+| Path | Description |
 |---|---|
+| *(root)* | **Qwen-MusicAVQA-7B, merged — 97.31%** |
+| `asr/merged_stage2/` | ASR Stage-2 merge (4.85% WER); what every AVQA run initializes from |
+| `asr/stage1_only/`, `asr/lora_stage2/`, `asr/lora_stage3/` | ASR track |
+| `avqa/init/` | ASR merge + untrained `music_projector` (the AVQA starting point) |
+| `avqa/headline/stage1/` | `music_projector` only, LLM frozen — 96.0% |
+| `avqa/headline/stage2_qproj_frozen/` | LoRA, question projector frozen — 97.31% (merged into the root) |
+| `avqa/headline/stage2_qproj_tuned/` | LoRA, question projector tuned — 95.49% |
+| `avqa/seeds/seed1234\|seed2026/` | the runs behind 96.0% ± 3.9% |
+| `avqa/ablations/<tag>/{stage1,stage2}/` | one folder per W&B `experiment_tag` (see the mapping table above) |
+| `avqa/comparison/qwen2.5-omni/` | fine-tuned Qwen2.5-Omni baseline |
+
+`headline/stage1/` is shared — both Stage-2 variants trained from it, differing only in whether the
+question projector was frozen. To reproduce training, start from `asr/merged_stage2/`, **not** the
+root: the root is the finished model.
+
+---|---|
 | `avqa_stage1_whisper_fullres_v2/` | Stage 1 (`music_projector` only, all else frozen) — shared by v2 **and** v3 |
 | `avqa_stage2_whisper_fullres_v3/` | Stage 2: best model (97.31%) |
 | `avqa_stage2_whisper_fullres_v3_seed1234/`, `_seed2026/` | seed runs behind the 96.0% ± 3.9% figure |
