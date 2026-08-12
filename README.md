@@ -138,12 +138,6 @@ Qwen2VLDualAudioForConditionalGeneration.from_pretrained("MayaKD/qwen2-vl-audio"
 question projector was frozen. To reproduce training, start from `asr/merged_stage2/`, **not** the
 root: the root is the finished model.
 
----|---|
-| `avqa_stage1_whisper_fullres_v2/` | Stage 1 (`music_projector` only, all else frozen) — shared by v2 **and** v3 |
-| `avqa_stage2_whisper_fullres_v3/` | Stage 2: best model (97.31%) |
-| `avqa_stage2_whisper_fullres_v3_seed1234/`, `_seed2026/` | seed runs behind the 96.0% ± 3.9% figure |
-| `avqa_init/` | Qwen2-VL-7B-Instruct with the audio/music special tokens added |
-
 ---
 
 ## Repository Structure

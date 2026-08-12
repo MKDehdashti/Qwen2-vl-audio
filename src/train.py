@@ -24,6 +24,23 @@ from eval_utils import evaluate_asr, ASREvalCallback
 
 STAGE1_BASE_DIR = '/workspace/projects/speech/stage1_checkpoint'
 HF_REPO         = 'MayaKD/qwen2-vl-audio'
+# The repo ROOT is now the merged AVQA model (Qwen-MusicAVQA-7B). Every AVQA run must
+# initialize from the ASR Stage-2 merge, which moved to this subfolder in the 2026-08-11
+# reorganization. Loading the root instead would silently start from a fine-tuned model.
+ASR_MERGE_SUBFOLDER = 'asr/merged_stage2'
+
+# HF layout (see CLAUDE.md Conventions). Uploads must land in the tree, not the old flat namespace.
+_HEADLINE = {'whisper_fullres_v2': 'avqa/headline/stage1',
+             'whisper_fullres_v3': 'avqa/headline/stage2_qproj_frozen'}
+def avqa_hf_path(experiment_tag: str, stage: int) -> str:
+    """Destination subfolder for an AVQA run's checkpoint."""
+    if experiment_tag == 'whisper_fullres_v2':
+        return _HEADLINE['whisper_fullres_v2'] if stage == 1 else 'avqa/headline/stage2_qproj_tuned'
+    if experiment_tag == 'whisper_fullres_v3':
+        return 'avqa/headline/stage1' if stage == 1 else _HEADLINE['whisper_fullres_v3']
+    if experiment_tag.startswith('whisper_fullres_v3_seed'):
+        return f"avqa/seeds/{experiment_tag.split('_')[-1]}/stage{stage}"
+    return f'avqa/ablations/{experiment_tag}/stage{stage}'
 
 
 def freeze_for_stage1(model):
@@ -303,18 +320,19 @@ def run_stage2(model, processor, lora_config, train_dataset=None, test_dataset=N
 
 
 def push_stage2(trainer, output_dir=None, repo_id=HF_REPO):
-    """Save LoRA adapter weights locally and push to HF under lora_stage2/ subfolder."""
+    """Save LoRA adapter weights locally and push to HF under asr/lora_stage2/."""
     if output_dir is None:
         output_dir = trainer.args.output_dir
     run_tag = output_dir.replace(STAGE2_BASE_DIR + '_', '') if STAGE2_BASE_DIR in output_dir else ''
     trainer.save_model(output_dir)
+    hf_subfolder = 'asr/lora_stage2'
     HfApi().upload_folder(
         folder_path=output_dir,
         repo_id=repo_id,
-        path_in_repo='lora_stage2',
+        path_in_repo=hf_subfolder,
         commit_message=f"Stage 2: LoRA adapter ({run_tag})",
     )
-    print(f"Stage 2 LoRA adapter pushed to {repo_id}/lora_stage2  [{output_dir}]")
+    print(f"Stage 2 LoRA adapter pushed to {repo_id}/{hf_subfolder}  [{output_dir}]")
 
 
 # ── Merge Stage 2 LoRA + Stage 3 (LoRA from merged weights) ──────────────────
@@ -327,7 +345,7 @@ def merge_stage2(local_adapter_dir=None, merged_output_dir=None, repo_id=HF_REPO
     """Load Stage 2 LoRA adapter, merge into base weights, save locally, push to HF.
 
     local_adapter_dir: local path to Stage 2 checkpoint (adapter_model.safetensors etc.)
-                       or None to load from HF repo lora_stage2/ subfolder (default).
+                       or None to load from HF repo asr/lora_stage2/ subfolder (default).
     merged_output_dir: where to save merged model locally.
                        defaults to /workspace/projects/speech/merged_stage2_TIMESTAMP.
 
@@ -352,7 +370,7 @@ def merge_stage2(local_adapter_dir=None, merged_output_dir=None, repo_id=HF_REPO
     if local_adapter_dir:
         model = PeftModel.from_pretrained(model, local_adapter_dir)
     else:
-        model = PeftModel.from_pretrained(model, repo_id, subfolder='lora_stage2')
+        model = PeftModel.from_pretrained(model, repo_id, subfolder='asr/lora_stage2')
 
     print("Merging LoRA into base weights ...")
     model = model.merge_and_unload()
@@ -470,18 +488,19 @@ def run_stage3(model, processor, lora_config, train_dataset, test_dataset,
 
 
 def push_stage3(trainer, output_dir=None, repo_id=HF_REPO):
-    """Save Stage 3 LoRA adapter and push to HF under lora_stage3/ subfolder."""
+    """Save Stage 3 LoRA adapter and push to HF under asr/lora_stage3/."""
     if output_dir is None:
         output_dir = trainer.args.output_dir
     run_tag = output_dir.replace(STAGE3_BASE_DIR + '_', '') if STAGE3_BASE_DIR in output_dir else ''
     trainer.save_model(output_dir)
+    hf_subfolder = 'asr/lora_stage3'
     HfApi().upload_folder(
         folder_path=output_dir,
         repo_id=repo_id,
-        path_in_repo='lora_stage3',
+        path_in_repo=hf_subfolder,
         commit_message=f"Stage 3: LoRA adapter ({run_tag})",
     )
-    print(f"Stage 3 LoRA adapter pushed to {repo_id}/lora_stage3  [{output_dir}]")
+    print(f"Stage 3 LoRA adapter pushed to {repo_id}/{hf_subfolder}  [{output_dir}]")
 
 
 # ── AVQA Stage 1: train music_projector only ─────────────────────────────────
@@ -505,9 +524,9 @@ def init_avqa_model(base_repo=HF_REPO, processor_path='/workspace/projects/speec
     processor = Qwen2VLProcessor.from_pretrained(processor_path)
     processor.audio_processor = Qwen2VLAudioProcessor()
 
-    print(f"Loading base model from {base_repo} ...")
+    print(f"Loading base model from {base_repo}/{ASR_MERGE_SUBFOLDER} ...")
     model = Qwen2VLDualAudioForConditionalGeneration.from_pretrained(
-        base_repo,
+        base_repo, subfolder=ASR_MERGE_SUBFOLDER,
         torch_dtype=torch.bfloat16,
         device_map='auto',
         attn_implementation='flash_attention_2',
@@ -618,28 +637,29 @@ def run_avqa_stage1(model=None, processor=None,
 
 
 def push_avqa_stage1(trainer, output_dir=None, repo_id=HF_REPO):
-    """Save model and push to HF under avqa_stage1_panns/ subfolder."""
+    """Save model and push to HF under avqa/ablations/panns8/stage1/."""
     if output_dir is None:
         output_dir = trainer.args.output_dir
     run_tag = output_dir.replace(AVQA_STAGE1_DIR + '_', '') if AVQA_STAGE1_DIR in output_dir else ''
     trainer.save_model(output_dir)
+    hf_subfolder = 'avqa/ablations/panns8/stage1'
     HfApi().upload_folder(
         folder_path=output_dir,
         repo_id=repo_id,
-        path_in_repo='avqa_stage1_panns',
+        path_in_repo=hf_subfolder,
         commit_message=f"AVQA Stage 1 (MERT): music_projector trained ({run_tag})",
     )
-    print(f"AVQA Stage 1 pushed to {repo_id}/avqa_stage1_panns  [{output_dir}]")
+    print(f"AVQA Stage 1 pushed to {repo_id}/{hf_subfolder}  [{output_dir}]")
 
 
 # ── AVQA Stage 2: LoRA + both projectors ─────────────────────────────────────
 
-def setup_avqa_stage2(checkpoint_path=HF_REPO, subfolder='avqa_stage1_panns',
+def setup_avqa_stage2(checkpoint_path=HF_REPO, subfolder='avqa/ablations/panns8/stage1',
                       processor_path='/workspace/projects/speech/processor'):
     """Load AVQA Stage 1 model and build LoRA config.
 
     checkpoint_path: HF repo or local dir with Stage 1 weights.
-    subfolder:       subfolder within the repo (default 'avqa_stage1_beats').
+    subfolder:       subfolder within the repo (default 'avqa/ablations/panns8/stage1').
 
     Returns (model, processor, lora_config).
     """
@@ -763,19 +783,20 @@ def run_avqa_stage2(model, processor, lora_config,
 
 
 def push_avqa_stage2(trainer, output_dir=None, repo_id=HF_REPO):
-    """Save LoRA adapter and push to HF under avqa_stage2_panns/ subfolder."""
+    """Save LoRA adapter and push to HF under avqa/ablations/panns8/stage2/."""
     if output_dir is None:
         output_dir = trainer.args.output_dir
     run_tag = output_dir.replace(AVQA_STAGE2_DIR + '_', '') if AVQA_STAGE2_DIR in output_dir else ''
     trainer.save_model(output_dir)
+    hf_subfolder = 'avqa/ablations/panns8/stage2'
     HfApi().upload_folder(
         folder_path=output_dir,
         repo_id=repo_id,
-        path_in_repo='avqa_stage2_panns',
+        path_in_repo=hf_subfolder,
         commit_message=f"AVQA Stage 2 (MERT): LoRA + projectors ({run_tag})",
         ignore_patterns=["README.md"],
     )
-    print(f"AVQA Stage 2 pushed to {repo_id}/avqa_stage2_panns  [{output_dir}]")
+    print(f"AVQA Stage 2 pushed to {repo_id}/{hf_subfolder}  [{output_dir}]")
 
 # ── AVQA Whisper ablation: Whisper-32 as music encoder ───────────────────────
 # Architecture: video audio → Whisper encoder (offline precompute) → stride-pool
@@ -806,9 +827,9 @@ def init_avqa_whisper_model(base_repo=HF_REPO,
     processor.audio_processor = Qwen2VLAudioProcessor()
     processor.n_music_tokens = 32
 
-    print(f"Loading base model from {base_repo} ...")
+    print(f"Loading base model from {base_repo}/{ASR_MERGE_SUBFOLDER} ...")
     model = Qwen2VLDualAudioForConditionalGeneration.from_pretrained(
-        base_repo,
+        base_repo, subfolder=ASR_MERGE_SUBFOLDER,
         torch_dtype=torch.bfloat16,
         device_map='auto',
         attn_implementation='flash_attention_2',
@@ -929,21 +950,22 @@ def run_avqa_whisper_stage1(model=None, processor=None,
 
 
 def push_avqa_whisper_stage1(trainer, output_dir=None, repo_id=HF_REPO):
-    """Save model and push to HF under avqa_stage1_whisper32/ subfolder."""
+    """Save model and push to HF under avqa/ablations/whisper32/stage1/."""
     if output_dir is None:
         output_dir = trainer.args.output_dir
     run_tag = output_dir.replace(AVQA_WHISPER_STAGE1_DIR + '_', '') if AVQA_WHISPER_STAGE1_DIR in output_dir else ''
     trainer.save_model(output_dir)
+    hf_subfolder = 'avqa/ablations/whisper32/stage1'
     HfApi().upload_folder(
         folder_path=output_dir,
         repo_id=repo_id,
-        path_in_repo='avqa_stage1_whisper32',
+        path_in_repo=hf_subfolder,
         commit_message=f"AVQA Stage 1 (Whisper-32): music_projector trained ({run_tag})",
     )
-    print(f"AVQA Stage 1 (Whisper) pushed to {repo_id}/avqa_stage1_whisper32  [{output_dir}]")
+    print(f"AVQA Stage 1 (Whisper) pushed to {repo_id}/{hf_subfolder}  [{output_dir}]")
 
 
-def setup_avqa_whisper_stage2(checkpoint_path=HF_REPO, subfolder='avqa_stage1_whisper32',
+def setup_avqa_whisper_stage2(checkpoint_path=HF_REPO, subfolder='avqa/ablations/whisper32/stage1',
                               processor_path='/workspace/projects/speech/processor',
                               modules_to_save=None):
     """Load Whisper Stage 1 model and build LoRA config.
@@ -1072,19 +1094,20 @@ def run_avqa_whisper_stage2(model, processor, lora_config,
 
 
 def push_avqa_whisper_stage2(trainer, output_dir=None, repo_id=HF_REPO):
-    """Save LoRA adapter and push to HF under avqa_stage2_whisper32/ subfolder."""
+    """Save LoRA adapter and push to HF under avqa/ablations/whisper32/stage2/."""
     if output_dir is None:
         output_dir = trainer.args.output_dir
     run_tag = output_dir.replace(AVQA_WHISPER_STAGE2_DIR + '_', '') if AVQA_WHISPER_STAGE2_DIR in output_dir else ''
     trainer.save_model(output_dir)
+    hf_subfolder = 'avqa/ablations/whisper32/stage2'
     HfApi().upload_folder(
         folder_path=output_dir,
         repo_id=repo_id,
-        path_in_repo='avqa_stage2_whisper32',
+        path_in_repo=hf_subfolder,
         commit_message=f"AVQA Stage 2 (Whisper-32): LoRA + projectors ({run_tag})",
         ignore_patterns=["README.md"],
     )
-    print(f"AVQA Stage 2 (Whisper) pushed to {repo_id}/avqa_stage2_whisper32  [{output_dir}]")
+    print(f"AVQA Stage 2 (Whisper) pushed to {repo_id}/{hf_subfolder}  [{output_dir}]")
 
 
 # ── AVQA Whisper-32-VarLen (no pad-to-3000 dilution in preprocessing) ────────
@@ -1193,16 +1216,17 @@ def push_avqa_whisper_varlen_stage1(trainer, output_dir=None, repo_id=HF_REPO):
         output_dir = trainer.args.output_dir
     run_tag = output_dir.replace(AVQA_WHISPER_VARLEN_STAGE1_DIR + '_', '') if AVQA_WHISPER_VARLEN_STAGE1_DIR in output_dir else ''
     trainer.save_model(output_dir)
+    hf_subfolder = 'avqa/ablations/whisper_fullres_varlen/stage1'
     HfApi().upload_folder(
         folder_path=output_dir,
         repo_id=repo_id,
-        path_in_repo='avqa_stage1_whisper_varlen',
+        path_in_repo=hf_subfolder,
         commit_message=f"AVQA Stage 1 (Whisper-VarLen): music_projector trained ({run_tag})",
     )
-    print(f"AVQA Stage 1 (Whisper-VarLen) pushed to {repo_id}/avqa_stage1_whisper_varlen  [{output_dir}]")
+    print(f"AVQA Stage 1 (Whisper-VarLen) pushed to {repo_id}/{hf_subfolder}  [{output_dir}]")
 
 
-def setup_avqa_whisper_varlen_stage2(checkpoint_path=HF_REPO, subfolder='avqa_stage1_whisper_varlen',
+def setup_avqa_whisper_varlen_stage2(checkpoint_path=HF_REPO, subfolder='avqa/ablations/whisper_fullres_varlen/stage1',
                                      processor_path='/workspace/projects/speech/processor'):
     from peft import LoraConfig
     from transformers import Qwen2VLProcessor
@@ -1329,14 +1353,15 @@ def push_avqa_whisper_varlen_stage2(trainer, output_dir=None, repo_id=HF_REPO):
         output_dir = trainer.args.output_dir
     run_tag = output_dir.replace(AVQA_WHISPER_VARLEN_STAGE2_DIR + '_', '') if AVQA_WHISPER_VARLEN_STAGE2_DIR in output_dir else ''
     trainer.save_model(output_dir)
+    hf_subfolder = 'avqa/ablations/whisper_fullres_varlen/stage2'
     HfApi().upload_folder(
         folder_path=output_dir,
         repo_id=repo_id,
-        path_in_repo='avqa_stage2_whisper_varlen',
+        path_in_repo=hf_subfolder,
         commit_message=f"AVQA Stage 2 (Whisper-VarLen): LoRA + projectors ({run_tag})",
         ignore_patterns=["README.md"],
     )
-    print(f"AVQA Stage 2 (Whisper-VarLen) pushed to {repo_id}/avqa_stage2_whisper_varlen  [{output_dir}]")
+    print(f"AVQA Stage 2 (Whisper-VarLen) pushed to {repo_id}/{hf_subfolder}  [{output_dir}]")
 
 
 # ── AVQA Whisper-32-Full (full-duration audio, chunked preprocessing) ─────────
@@ -1366,7 +1391,7 @@ def run_avqa_whisper_full_stage1(model=None, processor=None,
 
     seed: controls projector init + data-shuffle order (multi-seed error-bar runs).
     push: False → save Stage 1 locally only, skip HF upload (so seed runs don't
-          clobber the canonical avqa_stage1_{tag}/ subfolder on HF).
+          clobber the canonical avqa_hf_path(tag, 1) subfolder on HF).
     """
     from transformers import set_seed
     from avqa.dataset import AVQADataset
@@ -1494,10 +1519,10 @@ def cleanup_after_stage1(*refs):
 
 def push_avqa_whisper_full_stage1(trainer, output_dir=None, repo_id=HF_REPO,
                                    experiment_tag='whisper32_full'):
-    """Save model and push to HF under avqa_stage1_{experiment_tag}/ subfolder."""
+    """Save model and push to HF under avqa_hf_path(experiment_tag, 1)."""
     if output_dir is None:
         output_dir = trainer.args.output_dir
-    hf_subfolder = f'avqa_stage1_{experiment_tag}'
+    hf_subfolder = avqa_hf_path(experiment_tag, 1)
     trainer.save_model(output_dir)
     HfApi().upload_folder(
         folder_path=output_dir,
@@ -1508,7 +1533,7 @@ def push_avqa_whisper_full_stage1(trainer, output_dir=None, repo_id=HF_REPO,
     print(f"AVQA Stage 1 ({experiment_tag}) pushed to {repo_id}/{hf_subfolder}  [{output_dir}]")
 
 
-def setup_avqa_whisper_full_stage2(checkpoint_path=HF_REPO, subfolder='avqa_stage1_whisper32_full',
+def setup_avqa_whisper_full_stage2(checkpoint_path=HF_REPO, subfolder='avqa/ablations/whisper32_full/stage1',
                                     processor_path='/workspace/projects/speech/processor'):
     """Load Whisper-32-Full Stage 1 model and build LoRA config."""
     return setup_avqa_whisper_stage2(
@@ -1530,7 +1555,7 @@ def run_avqa_whisper_full_stage2(model, processor, lora_config,
 
     seed: set_seed before get_peft_model (LoRA init) + data_seed for shuffle order.
     push: False → save adapter locally only, skip HF upload (seed runs must not
-          clobber the canonical avqa_stage2_{tag}/ subfolder on HF).
+          clobber the canonical avqa_hf_path(tag, 2) subfolder on HF).
     """
     from transformers import set_seed
     from peft import get_peft_model
@@ -1638,10 +1663,10 @@ def run_avqa_whisper_full_stage2(model, processor, lora_config,
 
 def push_avqa_whisper_full_stage2(trainer, output_dir=None, repo_id=HF_REPO,
                                    experiment_tag='whisper32_full'):
-    """Save LoRA adapter and push to HF under avqa_stage2_{experiment_tag}/ subfolder."""
+    """Save LoRA adapter and push to HF under avqa_hf_path(experiment_tag, 2)."""
     if output_dir is None:
         output_dir = trainer.args.output_dir
-    hf_subfolder = f'avqa_stage2_{experiment_tag}'
+    hf_subfolder = avqa_hf_path(experiment_tag, 2)
     trainer.save_model(output_dir)
     HfApi().upload_folder(
         folder_path=output_dir,
@@ -1678,9 +1703,9 @@ def init_avqa_panns32_model(base_repo=HF_REPO,
     processor = Qwen2VLProcessor.from_pretrained(processor_path)
     processor.audio_processor = Qwen2VLAudioProcessor()
 
-    print(f"Loading base model from {base_repo} ...")
+    print(f"Loading base model from {base_repo}/{ASR_MERGE_SUBFOLDER} ...")
     model = Qwen2VLDualAudioForConditionalGeneration.from_pretrained(
-        base_repo,
+        base_repo, subfolder=ASR_MERGE_SUBFOLDER,
         torch_dtype=torch.bfloat16,
         device_map='auto',
         attn_implementation='flash_attention_2',
@@ -1801,16 +1826,17 @@ def push_avqa_panns32_stage1(trainer, output_dir=None, repo_id=HF_REPO):
         output_dir = trainer.args.output_dir
     run_tag = output_dir.replace(AVQA_PANNS32_STAGE1_DIR + '_', '') if AVQA_PANNS32_STAGE1_DIR in output_dir else ''
     trainer.save_model(output_dir)
+    hf_subfolder = 'avqa/ablations/panns32/stage1'
     HfApi().upload_folder(
         folder_path=output_dir,
         repo_id=repo_id,
-        path_in_repo='avqa_stage1_panns32',
+        path_in_repo=hf_subfolder,
         commit_message=f"AVQA Stage 1 (PANNs-32): music_projector trained ({run_tag})",
     )
-    print(f"AVQA Stage 1 (PANNs-32) pushed to {repo_id}/avqa_stage1_panns32  [{output_dir}]")
+    print(f"AVQA Stage 1 (PANNs-32) pushed to {repo_id}/{hf_subfolder}  [{output_dir}]")
 
 
-def setup_avqa_panns32_stage2(checkpoint_path=HF_REPO, subfolder='avqa_stage1_panns32',
+def setup_avqa_panns32_stage2(checkpoint_path=HF_REPO, subfolder='avqa/ablations/panns32/stage1',
                               processor_path='/workspace/projects/speech/processor'):
     """Load PANNs-32 Stage 1 checkpoint and build LoRA config."""
     from peft import LoraConfig
@@ -1939,14 +1965,15 @@ def push_avqa_panns32_stage2(trainer, output_dir=None, repo_id=HF_REPO):
         output_dir = trainer.args.output_dir
     run_tag = output_dir.replace(AVQA_PANNS32_STAGE2_DIR + '_', '') if AVQA_PANNS32_STAGE2_DIR in output_dir else ''
     trainer.save_model(output_dir)
+    hf_subfolder = 'avqa/ablations/panns32/stage2'
     HfApi().upload_folder(
         folder_path=output_dir,
         repo_id=repo_id,
-        path_in_repo='avqa_stage2_panns32',
+        path_in_repo=hf_subfolder,
         commit_message=f"AVQA Stage 2 (PANNs-32): LoRA + projectors ({run_tag})",
         ignore_patterns=["README.md"],
     )
-    print(f"AVQA Stage 2 (PANNs-32) pushed to {repo_id}/avqa_stage2_panns32  [{output_dir}]")
+    print(f"AVQA Stage 2 (PANNs-32) pushed to {repo_id}/{hf_subfolder}  [{output_dir}]")
 
 
 # ── AVQA Whisper-fullres-VarLen (no pad-to-3000 on partial last chunk) ────────
@@ -1974,7 +2001,7 @@ def run_avqa_whisper_fullres_varlen_stage1(model=None, processor=None,
 
 
 def setup_avqa_whisper_fullres_varlen_stage2(checkpoint_path=HF_REPO,
-                                             subfolder='avqa_stage1_whisper_fullres_varlen',
+                                             subfolder='avqa/ablations/whisper_fullres_varlen/stage1',
                                              processor_path='/workspace/projects/speech/processor'):
     return setup_avqa_whisper_stage2(
         checkpoint_path=checkpoint_path,
@@ -2094,7 +2121,7 @@ def run_avqa_whisper_fullres_v2_stage1(model=None, processor=None,
 
 
 def setup_avqa_whisper_fullres_v2_stage2(checkpoint_path=HF_REPO,
-                                         subfolder='avqa_stage1_whisper_fullres_v2',
+                                         subfolder='avqa/headline/stage1',
                                          processor_path='/workspace/projects/speech/processor'):
     return setup_avqa_whisper_stage2(
         checkpoint_path=checkpoint_path,
@@ -2127,7 +2154,7 @@ AVQA_WHISPER_FULLRES_V3_STAGE2_DIR = '/workspace/projects/speech/avqa_stage2_whi
 
 
 def setup_avqa_whisper_fullres_v3_stage2(checkpoint_path=HF_REPO,
-                                         subfolder='avqa_stage1_whisper_fullres_v2',
+                                         subfolder='avqa/headline/stage1',
                                          processor_path='/workspace/projects/speech/processor'):
     return setup_avqa_whisper_stage2(
         checkpoint_path=checkpoint_path,
@@ -2183,10 +2210,10 @@ def run_avqa_whisper_fullres_notts_stage1(model=None, processor=None,
     TTS→Whisper audio, so the music_projector co-adapts to the text context.
 
     match_wrapper=False (default): the bare notts arm — question text REPLACES the prompt.
-      Pushes to HF subfolder avqa_stage1_whisper_fullres_notts (the original notts).
+      Pushes to avqa/ablations/whisper_fullres_notts/stage1 (the original notts).
     match_wrapper=True: single-variable control for sec:delivery — the text arm mirrors the
       TTS arm [video, music, text(Q), "Answer the question."], so the ONLY difference vs TTS
-      is the question's pathway. Distinct tag → avqa_stage1_whisper_fullres_notts_matched
+      is the question's pathway. Distinct tag → whisper_fullres_notts_matched
       (never clobbers the original notts). Threaded into BOTH datasets.
     """
     from avqa.dataset import AVQADataset
@@ -2218,12 +2245,13 @@ def setup_avqa_whisper_fullres_notts_stage2(checkpoint_path=HF_REPO,
     """Load the TEXT-trained notts Stage 1 checkpoint (not the TTS v2 one) for Stage 2.
 
     subfolder=None → defaults to the notts Stage 1 subfolder matching match_wrapper:
-      avqa_stage1_whisper_fullres_notts (bare) or ..._notts_matched (matched control).
+      avqa/ablations/whisper_fullres_notts/stage1 (bare) or
+      avqa/ablations/whisper_fullres_notts_matched/stage1 (matched control).
     An explicit subfolder= always wins (e.g. resuming a specific run).
     """
     if subfolder is None:
-        subfolder = ('avqa_stage1_whisper_fullres_notts_matched' if match_wrapper
-                     else 'avqa_stage1_whisper_fullres_notts')
+        subfolder = avqa_hf_path(
+            'whisper_fullres_notts_matched' if match_wrapper else 'whisper_fullres_notts', 1)
     return setup_avqa_whisper_stage2(
         checkpoint_path=checkpoint_path,
         subfolder=subfolder,
@@ -2236,7 +2264,7 @@ def run_avqa_whisper_fullres_notts_stage2(model, processor, lora_config,
                                           output_dir=None, resume_from_checkpoint=None,
                                           num_train_epochs=1, match_wrapper=False):
     """Stage 2 LoRA for the notts variant. match_wrapper=True → matched control:
-    datasets mirror the TTS arm and push to avqa_stage2_whisper_fullres_notts_matched
+    datasets mirror the TTS arm and push to avqa/ablations/whisper_fullres_notts_matched/stage2
     (never clobbers the original notts). Must match the Stage 1 / setup match_wrapper."""
     from avqa.dataset import AVQADataset
     run_id = datetime.now().strftime('%Y%m%d_%H%M%S')

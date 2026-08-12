@@ -26,8 +26,10 @@ sys.path.insert(0, "/workspace/projects/speech/src/asr")
 import torch
 
 HF_REPO       = "MayaKD/qwen2-vl-audio"
-STAGE1_SUBDIR = "avqa_stage1_whisper_fullres_v2"
-STAGE2_SUBDIR = "avqa_stage2_whisper_fullres_v2"
+# Paths in the reorganized HF tree (2026-08-11). whisper_fullres_v2 is the headline
+# Stage 1; its Stage 2 is the question-projector-tuned variant.
+STAGE1_SUBDIR = "avqa/headline/stage1"
+STAGE2_SUBDIR = "avqa/headline/stage2_qproj_tuned"
 PROCESSOR_DIR = "/workspace/projects/speech/processor"
 
 

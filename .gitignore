@@ -25,6 +25,8 @@ model_checkpoint/
 stage1_checkpoint_*/
 stage2_checkpoint_*/
 stage3_checkpoint_*/
+avqa_stage*_checkpoint*/
+*_checkpoint_*/
 *.safetensors
 *.pt
 *.bin
@@ -92,3 +94,13 @@ music_avqa_dataset/data/*/
 
 # Local video data (37GB) — features live on HF, not git
 /data/
+
+# -----------------------
+# LaTeX build byproducts
+# build.sh compiles a scratch copy in paper/; only arxiv_files/ is the upload set
+# -----------------------
+*.blg
+*.aux
+*.out
+*.toc
+*.synctex.gz
