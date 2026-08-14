@@ -205,21 +205,24 @@ Before training, precompute features from the [MUSIC-AVQA dataset](https://githu
 
 ### Already published
 
-The audio feature sets are on
+Every precomputed audio feature set is on
 [`MayaKD/qwen2-vl-audio-data`](https://huggingface.co/datasets/MayaKD/qwen2-vl-audio-data) — download
-them rather than recomputing:
+these rather than recomputing them (they need the source videos, which are not redistributed):
 
 | Directory | Used by |
 |---|---|
-| `whisper_features_fullres/` | the headline model (music branch) |
+| `whisper_features_fullres/` | **the headline model** (music branch) |
+| `whisper_features_full/` | the Whisper-60 s-compressed ablation (70.5%) |
+| `whisper_features/` | the Whisper-30 s ablation (95.91%) |
+| `whisper_features_fullres_varlen/` | the variable-length ablation (78.55%, negative result) |
 | `panns_features/` | the PANNs-8 / PANNs-32 ablations |
-| `whisper_features/` | the Whisper-30 s ablation |
 | `clap_features/` | the CLAP ablation (exploratory, not in the paper) |
+| `tts_questions_r/` | the MUSIC-AVQA-R robustness evaluation |
 
 ### You must regenerate these two
 
-`video_frames/` (42 GB) and `tts_questions/` were **too large to upload**, so they are not in that
-repo and have to be produced locally:
+`video_frames/` (42 GB) and `tts_questions/` (42,814 of its 45,629 entries are symlinks) were **too
+large to upload**, so they are not in that repo and have to be produced locally:
 
 - **`tts_questions/`** — regenerate directly; **no video needed**. The question text comes from
   `music_avqa_dataset/data/json/` (included in this repo) and is synthesized with `edge-tts`. Only
