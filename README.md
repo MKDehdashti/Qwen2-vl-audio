@@ -199,25 +199,63 @@ The `transformers` submodule is a fork of HuggingFace Transformers with the `Qwe
 
 ## Preprocessing (AVQA)
 
-Before training, precompute features from the [MUSIC-AVQA dataset](https://github.com/GeWu-Lab/MUSIC-AVQA):
+Before training, precompute features from the [MUSIC-AVQA dataset](https://github.com/GeWu-Lab/MUSIC-AVQA).
+
+### Already published
+
+The audio feature sets are on
+[`MayaKD/qwen2-vl-audio-data`](https://huggingface.co/datasets/MayaKD/qwen2-vl-audio-data) — download
+them rather than recomputing:
+
+| Directory | Used by |
+|---|---|
+| `whisper_features_fullres/` | the headline model (music branch) |
+| `panns_features/` | the PANNs-8 / PANNs-32 ablations |
+| `whisper_features/` | the Whisper-30 s ablation |
+| `clap_features/` | the CLAP ablation (exploratory, not in the paper) |
+
+### You must regenerate these two
+
+`video_frames/` (42 GB) and `tts_questions/` were **too large to upload**, so they are not in that
+repo and have to be produced locally:
+
+- **`tts_questions/`** — regenerate directly; **no video needed**. The question text comes from
+  `music_avqa_dataset/data/json/` (included in this repo) and is synthesized with `edge-tts`. Only
+  the 2,815 unique question texts are synthesized; the remaining ~42,800 become symlinks.
+- **`video_frames/`** — requires the **source videos, which are not redistributed here**. Download
+  `MUSIC-AVQA-videos-Real.zip` (36.7 GB) from the MUSIC-AVQA authors, unzip it, then extract frames.
+  Note that Google Drive may refuse the download with a quota error; if so, retry later or request
+  the archive from the dataset authors. Roughly 1,900 of the 9,288 referenced videos are no longer
+  downloadable — the loaders skip them, which is why the effective test split is 7,402 pairs and
+  not the full 9,185.
 
 ```bash
-# Precomputed features are available on HuggingFace:
-# MayaKD/qwen2-vl-audio-data (whisper_features_fullres/, panns_features/, video_frames/, tts_questions/)
-
-# Or recompute from scratch:
+# 1. TTS questions — no video required
 python src/avqa/tts_preprocess.py --out_dir music_avqa_dataset/data/tts_questions
+
+# 2. Source videos — needed for video_frames/, and for recomputing any feature set from scratch
+gdown 1Ovj5Ay8rDXaPy57CNCHes0A99S43lPBy -O MUSIC-AVQA-videos-Real.zip
+unzip MUSIC-AVQA-videos-Real.zip -d music_avqa_dataset/data/video
+
+# 3. Video frames — 8 fixed frames per video (~1,196 visual tokens per sample)
+python src/avqa/video_precompute.py --video_dir music_avqa_dataset/data/video \
+    --out_dir music_avqa_dataset/data/video_frames
+```
+
+### Recomputing the published features (optional)
+
+Only if you do not want to download them. Both scripts need the source videos from step 2 above.
+
+```bash
 # Whisper music features. The best model uses Whisper for both paths, but this script precomputes
 # only the music branch; question audio is encoded live in the forward pass.
 python src/avqa/whisper_preprocess_fullres.py --video_dir music_avqa_dataset/data/video \
     --out_dir music_avqa_dataset/data/whisper_features_fullres
 
-# PANNs features — only needed to reproduce the PANNs-32 ablation
+# PANNs features — only needed to reproduce the PANNs ablations
 python src/avqa/panns_preprocess.py --video_dir music_avqa_dataset/data/video \
     --out_dir music_avqa_dataset/data/panns_features \
     --checkpoint <path/to/Cnn14_mAP=0.431.pth>
-python src/avqa/video_precompute.py --video_dir music_avqa_dataset/data/video \
-    --out_dir music_avqa_dataset/data/video_frames
 ```
 
 PANNs checkpoint (`Cnn14_mAP=0.431.pth`) available at [zenodo.org/record/3987831](https://zenodo.org/record/3987831).
