@@ -11,7 +11,9 @@ question *and* the music track, through two separate linear projectors. PANNs CN
 baseline**, not part of the best model — swapping Whisper's frame sequence for a PANNs pooled vector at
 the same token budget costs 26 points.
 
-Paper: *Qwen-MusicAVQA-7B: A Multimodal Model for Music Audio-Visual QA*.
+📄 **Paper:** [*Qwen-MusicAVQA-7B: A Multimodal Model for Music Audio-Visual QA*](https://arxiv.org/abs/2608.11329) (arXiv:2608.11329)
+🤗 **Checkpoints:** [`MayaKD/qwen2-vl-audio`](https://huggingface.co/MayaKD/qwen2-vl-audio)
+
 (The repo, W&B runs and HF checkpoints predate that name and use `qwen2-vl-audio` throughout.)
 
 Architecture diagram: [Qwen2_VL_Audio_architecture.pdf](Qwen2_VL_Audio_architecture.pdf)
@@ -310,11 +312,12 @@ Key training decisions:
 If you use this work, please cite:
 
 ```bibtex
-@misc{dehdashti2026qwenmusicavqa,
-  title  = {Qwen-MusicAVQA-7B: A Multimodal Model for Music Audio-Visual QA},
-  author = {Dehdashti, Maryam},
-  year   = {2026},
-  url    = {https://github.com/MKDehdashti/Qwen2-vl-audio}
+@article{dehdashti2026qwenmusicavqa,
+  title   = {Qwen-MusicAVQA-7B: A Multimodal Model for Music Audio-Visual QA},
+  author  = {Dehdashti, Maryam},
+  journal = {arXiv preprint arXiv:2608.11329},
+  year    = {2026},
+  url     = {https://arxiv.org/abs/2608.11329}
 }
 ```
 
