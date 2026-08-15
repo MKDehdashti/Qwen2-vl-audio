@@ -40,6 +40,11 @@ openai-whisper         # EnglishTextNormalizer for WER scoring (imports as `whis
 # ---- Vision ----
 Pillow
 
+# ---- Testing ----
+# tests/ parses src/ with ast and imports nothing heavy, so pytest is the only
+# test dependency:  python -m pytest tests/ -q
+pytest
+
 # ---- Core utilities (imported directly by src/; usually transitive, pinned here explicitly) ----
 numpy
 tqdm
