@@ -104,3 +104,8 @@ music_avqa_dataset/data/*/
 *.out
 *.toc
 *.synctex.gz
+
+# -----------------------
+# Tests
+# -----------------------
+.pytest_cache/
