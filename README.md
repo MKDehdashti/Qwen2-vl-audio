@@ -3,8 +3,9 @@
 Fine-tuning [Qwen2-VL-7B-Instruct](https://huggingface.co/Qwen/Qwen2-VL-7B-Instruct) with a grafted Whisper encoder for two tasks:
 
 1. **ASR** — speech recognition via Whisper encoder + linear projection → **4.85% WER** on LibriSpeech test-clean
-2. **MUSIC-AVQA** — audio-visual question answering on music performance videos → **97.31% accuracy** on the
-   7,402-pair available-video test subset
+2. **MUSIC-AVQA** — audio-visual question answering on music performance videos → **96.0% ± 3.9%**
+   across three full retraining seeds on the 7,402-pair available-video test subset
+   (seed-42 representative run: 97.31%)
 
 In the best AVQA model, a **single frozen Whisper encoder serves both roles**: it encodes the TTS-spoken
 question *and* the music track, through two separate linear projectors. PANNs CNN14 is an **ablation
@@ -94,6 +95,28 @@ internal labels. Mapping:
 `avqa_stage2/`. The plain `whisper_fullres` run is an earlier 60 s-chunked variant not reported in the
 paper.)
 
+### Why the ablations differ: temporal resolution, not encoder quality
+
+`whisper32_full` (70.5%) and `whisper32` (95.91%) use the **same frozen Whisper encoder and the same
+32-token budget**. The only difference is how much time each token covers — and that accounts for the
+25-point gap. This is the paper's central finding, and the reason the internal names are misleading on
+their own:
+
+| Music encoder | Representation | Audio in | # tok. | Proj. | Overall | AV/Temp. |
+|---|---|---|---|---|---|---|
+| *Pooled — one global vector expanded to tokens* ||||||
+| PANNs-8 | classification, 2048-d | full clip | 8 | 59M | 66.9% | 69.9% |
+| PANNs-32 | classification, 2048-d | full clip | 32 | 235M | 69.9% | 69.4% |
+| *Whisper — a 1280-d frame sequence, one token per frame* ||||||
+| Whisper-30s (`whisper32`) | **0.94 s/token** | first 30 s | 32 | 4.6M | 95.9% | 86.2% |
+| **Whisper-60s-chunked** (`whisper_fullres_v3`) | **0.94 s/token** | ~60 s | 32–64 | 4.6M | **97.3%** | **92.2%** |
+| Whisper-60s-compressed (`whisper32_full`) | **1.875 s/token** | ~60 s | 32 | 4.6M | 70.5% | 64.7% |
+
+Note the 26-point PANNs-32 → Whisper-30s gap at an identical 32-token budget, with a **50× smaller
+projector** (4.6M vs 235M). Seeing *more* audio does not help if the representation is pooled flat.
+
+### On comparability
+
 The fine-tuned Omni comparison matches data, inputs, audio duration, and Stage-2 hyperparameters, but
 the systems differ in backbone and adaptation; read it as a system-level comparison rather than an
 isolated encoder comparison.
@@ -102,6 +125,13 @@ isolated encoder comparison.
 and the 7,402-pair available-video test subset, so the two blocks are not directly comparable.
 Zero-shot Omni is the audio-matched re-run (`src/avqa/omni/eval_qwen25omni_audiomatched.py`, 56.82%);
 an earlier 38.42% figure fed the model frames + text only, without audio, and is superseded.
+
+**Is the available-video subset easier?** There is some evidence it is not. Qwen2.5-Omni-7B, fine-tuned
+on this subset, reaches **80.9%** — *below* the 83.5% the best published system reports on the full
+official split. A substantially easier subset should have pushed a strong modern 7B model above the
+published numbers, not below them. This is directional rather than conclusive: our Omni row trains on
+8,000 pairs against the published systems' full ~32k train split, so the two differ in training budget
+as well as test set.
 
 **Per-modality breakdown (v3):**
 
